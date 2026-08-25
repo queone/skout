@@ -1,0 +1,11 @@
+Look up a term in the skout glossary
+
+Usage: skout i [OPTIONS] [TERM]
+
+Arguments:
+  [TERM]
+
+Options:
+  -l, --league <KEY>                 Yahoo league key
+  -d, --debug                        Print operation diagnostics
+  -h, -?, --help                     Print this help

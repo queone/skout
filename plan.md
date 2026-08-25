@@ -21,15 +21,15 @@ Move active Skout development to the public Go successor while preserving the fr
 - Retain frozen Rust CLI version `0.22.1` as reference evidence only.
 - Retain Govna executable `v0.7.6` and canon `v0.35.0` as separate governance axes.
 - Implement exact plain root help and version output.
-- Fail closed for every unported invocation.
+- Implement `i [term]` and `whatis [term]` with the embedded frozen glossary, bounded argument parsing, and terminal-aware output.
+- Fail closed for every remaining unported invocation.
 - Keep configuration, storage, networking, and product behavior absent.
 - Publish the bootstrap as an explicitly incomplete first Go release.
 
 ## Deferred Port Scope
 
-- Port command parsing and command-specific help.
-- Port `fetch`, `st`, `sync`, `reset`, `m`, `t`, `tt`, `sp`, `r`, `rt`, `h`, `p`, and `i`.
-- Preserve the `whatis` alias.
+- Port command parsing and command-specific help for the remaining commands.
+- Port `fetch`, `st`, `sync`, `reset`, `m`, `t`, `tt`, `sp`, `r`, `rt`, `h`, and `p`.
 - Port configuration, caching, SQLite schema 6, providers, reconciliation, analysis, and rendering.
 - Define ordering and package boundaries in the acceptance document for each later behavior slice.
 

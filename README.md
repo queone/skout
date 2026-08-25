@@ -11,10 +11,12 @@ Skout brings fantasy-league context, MLB data, player analysis, and concise term
 The implemented Go surface is intentionally small:
 
 - Run with no arguments, `-h`, `-?`, or `--help` to print the frozen plain root help with the new Go version.
-- Run with `-v` or `--version` to print `skout 0.1.0`.
-- Treat every other invocation as unported, exit with status 2, and perform no product operation.
+- Run with `-v` or `--version` to print `skout 0.2.0`.
+- Run `i [term]` or `whatis [term]` to browse or search the embedded 113-entry glossary.
+- Use glossary help, league and debug flag compatibility, terminal-aware color, and interactive disambiguation without configuration or network access.
+- Treat every remaining command as unported, exit with status 2, and perform no product operation.
 
-Configuration, caching, databases, providers, synchronization, analysis, and every functional command remain deferred. The first public Go release is an explicitly incomplete bootstrap milestone.
+Configuration, caching, databases, providers, synchronization, analysis, and every other functional command remain deferred. The first public Go release remains an explicitly incomplete bootstrap milestone.
 
 ## Frozen Baseline
 
@@ -24,7 +26,7 @@ The behavioral reference is `queone/skout-rust` tag `v0.36.3` at commit `13d8141
 | --- | --- |
 | Frozen Rust repository release | `v0.36.3` |
 | Frozen Rust CLI version | `0.22.1` |
-| Go binary and release | `0.1.0` |
+| Go binary and release | `0.2.0` |
 | SQLite schema target | `6` |
 | Govna executable | `v0.7.6` |
 | Govna canon | `v0.35.0` |
@@ -37,7 +39,7 @@ Run `./build.sh` for formatting, tests, vetting, static analysis, compilation, a
 
 ## Deferred Commands
 
-The target command surface remains `fetch`, `st`, `sync`, `reset`, `m`, `t`, `tt`, `sp`, `r`, `rt`, `h`, `p`, and `i`, including the `whatis` alias. Their behavior will move in separately authorized migration slices.
+The deferred command surface remains `fetch`, `st`, `sync`, `reset`, `m`, `t`, `tt`, `sp`, `r`, `rt`, `h`, and `p`. Their behavior will move in separately authorized migration slices.
 
 Final parity review and archival of `skout-rust` remain separate Director decisions.
 
