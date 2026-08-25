@@ -54,10 +54,10 @@ The resolved module graph contains `github.com/hashicorp/golang-lru/v2 v2.0.7` u
 | --- | --- |
 | Frozen Rust repository release | `v0.36.3` |
 | Frozen Rust CLI | `0.22.1` |
-| Go binary and release | `0.3.0` |
+| Go binary and release | `0.3.1` |
 | SQLite schema target | `6` |
-| Govna executable | `v0.7.6` |
-| Govna canon | `v0.35.0` |
+| Govna executable | `v0.7.8` |
+| Govna canon | `v0.36.1` |
 
 The axes advance independently. Rust versions remain reference evidence; the Go binary and release line has its own history.
 

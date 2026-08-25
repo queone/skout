@@ -65,6 +65,12 @@ Note: prefer wording that is easiest for an LLM to follow, while staying simple 
 - Report each written deliverable with a one-paragraph chat summary plus the file path.
 - Quote at most short, targeted snippets from a written file when discussing a specific change.
 
+### Plain Language
+
+- Apply plain-language rules to responses, ACs, findings, completion reports, and release summaries.
+- Lead with the concrete problem, effect, or decision in plain language.
+- Pair each necessary Govna label with its plain-language meaning at first use.
+
 ### Session Entry
 
 - Treat AGENTS.md as the active operating contract for this repository.
@@ -72,7 +78,7 @@ Note: prefer wording that is easiest for an LLM to follow, while staying simple 
 - Treat planning, editing, reviewing, command choice, and implementation work as substantive actions.
 - Confirm the gate set before any primary-repository file change: AC status, explicit authorization, scoped edits, tests in the same pass, and no agent-run commits.
 - Route ancillary-repository and path changes through `### Primary And Ancillary Scope`.
-- Treat changed-content integrity, AC-template structure, Instruction Style, and applicable Pre-Implementation Verification as the tests-in-the-same-pass gate when a change pass creates or edits only an active AC document.
+- Treat changed-content integrity, AC-template structure, Plain Language, Instruction Style, and applicable Pre-Implementation Verification as the tests-in-the-same-pass gate when a change pass creates or edits only an active AC document.
 - Resolve instruction conflicts in this order: user instruction within authorized scope, then AGENTS.md, then referenced govna docs, then model defaults.
 - Follow an explicit Director workflow override without requiring contract-amendment language.
 - Stop when a request lacks authorization, scope, or required context.
@@ -343,6 +349,7 @@ Note: the Director flags scope concerns in chat during this window.
 - Run this checklist after the Director resolves all review questions.
 - Confirm each settled decision landed verbatim in the AC.
 - Confirm ATs match settled wording.
+- Confirm the AC title and Summary lead with the concrete outcome in plain language.
 - Confirm every new or rewritten instruction in AGENTS.md follows Instruction Style.
 - List ✓ for each check.
 - Flag every gap.
@@ -376,10 +383,10 @@ Note: the Director flags scope concerns in chat during this window.
 - Use `## Project Rules` as the AGENTS.md boundary.
 - Use `## Project Practices` as the boundary for `govna/development-guidelines.md`, `govna/editing-guidelines.md`, and CODE `govna/build-release.md`.
 - Preserve the boundary heading and every line below it as repo-owned content.
-- Confirm or override an unresolved emitted validation disposition in chat.
-- Run the resolved validation command after all selected sync, migration, and deletion work.
-- Cite repository evidence when resolving validation as `Not applicable`.
-- Install or replace `govna/canon-baseline.txt` from the scratch render only after every other applicable acceptance test, routing outcome, and validation disposition passes.
+- Resolve an unresolved emitted repository check in chat.
+- Run the chosen repository command after all selected sync, migration, and deletion work.
+- Cite repository evidence when choosing `Not applicable` for the repository check.
+- Write `govna/canon-baseline.txt` from the scratch render only after every other applicable acceptance test and routing outcome passes and the resolved repository check succeeds or its `Not applicable` evidence holds.
 - Refresh Rust validation evidence from the same scratch baseline only when the repository provides Rust validation-token support and the installed `govna/canon-baseline.txt` is verified.
 - Use the refreshed Rust validation token as Package evidence only when the repository provides Rust validation-token support.
 - Do not re-run `govna audit` as an implementation gate for the emitted AC.

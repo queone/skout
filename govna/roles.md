@@ -61,7 +61,8 @@ This file defines Operator and Director ownership. `AGENTS.md` is authoritative.
 - Follow `AGENTS.md` Review Style.
 - Use one-line acknowledgments for trivial signals.
 - Use structured summaries for substantive completions or Director decisions.
-- Keep substantive summaries focused on task results and actionable exceptions.
+- Lead substantive summaries with the concrete result or actionable exception.
+- Explain each necessary Govna workflow label after that plain result.
 
 ## What the Operator Must Defer
 
@@ -70,8 +71,9 @@ This file defines Operator and Director ownership. `AGENTS.md` is authoritative.
 - Do not make architectural bets (build vs. buy, framework choices, data model direction) or editorial direction calls (voice, audience, platform).
 - Do not negotiate scope questions without the director in the loop.
 - Do not resolve scope questions without the director in the loop.
-- Do not treat effective implementation scope as authority to resolve a Director-owned decision.
-- Correct an evidenced completeness gap without a fresh phase instruction only under the bounded exception in `AGENTS.md`.
+- Treat effective implementation scope as a narrow exception for a directly broken supporting artifact whose result the Director already settled.
+- Do not use that exception to resolve a Director-owned decision.
+- Treat a bounded completeness correction as an Implement-time fix for a missed path or instruction whose required result is already settled by the active AC.
 - Do not expand or contract the definition of "done" for any work item.
 - Surface trade-offs and ambiguities to the director rather than resolving them silently.
 

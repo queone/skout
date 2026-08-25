@@ -14,7 +14,7 @@ func TestProductionVersionAndRootHelpWiring(t *testing.T) {
 	}{
 		{args: nil, fixture: "testdata/root-help.txt"},
 		{args: []string{"--help"}, fixture: "testdata/root-help.txt"},
-		{args: []string{"--version"}, want: "skout 0.3.0\n"},
+		{args: []string{"--version"}, want: "skout 0.3.1\n"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(test.args, &stdout, &stderr); code != 0 {

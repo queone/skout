@@ -79,7 +79,7 @@ func TestRootHelpAndGlossaryPlainBehaviorRemainFrozen(t *testing.T) {
 	}
 	for _, args := range [][]string{nil, {"-h"}, {"-?"}, {"--help"}} {
 		var stdout, stderr bytes.Buffer
-		code := Run(args, "0.3.0", Context{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}, Handlers{})
+		code := Run(args, "0.3.1", Context{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}, Handlers{})
 		if code != 0 || !bytes.Equal(stdout.Bytes(), want) || stderr.Len() != 0 {
 			t.Errorf("root %v code=%d stdout differs=%v stderr=%q", args, code, !bytes.Equal(stdout.Bytes(), want), stderr.String())
 		}

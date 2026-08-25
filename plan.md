@@ -23,7 +23,7 @@ Move active Skout development to the public Go successor while preserving the fr
 - Port bounded public HTTP transport plus MLB StatsAPI, ESPN, and OddsShark adapters.
 - Port executable `fetch`, non-persisting `st`, MLB roster `t`, MLB totals `tt`, and probable-pitcher `sp` commands with deterministic display and stale fallback.
 - Retain a CGo-free SQLite runtime and the reviewed graph-only MPL-2.0 exception for `github.com/hashicorp/golang-lru/v2 v2.0.7` while it remains outside production and project-test package closures.
-- Retain frozen Rust CLI version `0.22.1`, Govna executable `v0.7.6`, and Govna canon `v0.35.0` as separate reference axes.
+- Retain frozen Rust CLI version `0.22.1`, Govna executable `v0.7.8`, and Govna canon `v0.36.1` as separate reference axes.
 
 ## Deferred Port Scope
 

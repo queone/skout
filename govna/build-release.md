@@ -64,7 +64,7 @@ Note: the operator flow has two steps.
 
 1. **Run prep.**
    - Classify the AC scope under semver.
-   - Draft a release message no longer than 80 characters.
+   - Draft a release message that names the delivered user-visible result in no more than 80 characters.
    - Run the stack-defined `./build.sh prep vX.Y.Z "message"` invocation.
    - Pass current validation evidence with `--validation-token` or `-t` when supported.
    - Run ordinary canonical pre-change validation for Go prep.

@@ -30,10 +30,10 @@ The behavioral reference is `queone/skout-rust` tag `v0.36.3` at commit `13d8141
 | --- | --- |
 | Frozen Rust repository release | `v0.36.3` |
 | Frozen Rust CLI version | `0.22.1` |
-| Go binary and release | `0.3.0` |
+| Go binary and release | `0.3.1` |
 | SQLite schema target | `6` |
-| Govna executable | `v0.7.6` |
-| Govna canon | `v0.35.0` |
+| Govna executable | `v0.7.8` |
+| Govna canon | `v0.36.1` |
 
 These values describe separate version axes. The Go runtime now preserves SQLite schema 6 without introducing schema 7.
 
