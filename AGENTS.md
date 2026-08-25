@@ -527,3 +527,4 @@ Note: `CLAUDE.md` is an example of an exempt identifier — it names a product-s
 - Follow existing repo patterns unless an approved improvement says otherwise.
 - Preserve frozen Skout behavior unless the Director authorizes an intentional difference.
 - Keep production code and permanent tests independent of the frozen Rust repository.
+- Skip a dependency-license-audit acceptance test unless the Director explicitly requests one.
