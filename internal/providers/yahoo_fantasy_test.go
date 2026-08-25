@@ -45,7 +45,7 @@ func TestYahooFantasyFixturesNormalizeCompleteWorkflow(t *testing.T) {
 		t.Fatalf("matchups=%#v err=%v", matchups, err)
 	}
 	weekly, err := ParseRosterWeekStats("mlb.l.1.t.1", 7, yahooFixture(t, "weekly-stats.json"))
-	if err != nil || len(weekly.Players) != 1 || weekly.Players[0].HomeRuns != 1 || weekly.Players[0].HAB != "3-10" {
+	if err != nil || len(weekly.Players) != 1 || weekly.Players[0].HomeRuns != 1 || weekly.Players[0].HAB != "3/10" {
 		t.Fatalf("weekly=%#v err=%v", weekly, err)
 	}
 	// Daily and weekly payloads deliberately share the same normalizer; only

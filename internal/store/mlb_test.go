@@ -41,6 +41,38 @@ func TestMLBRosterReplacementPreservesUnrelatedRowsAndEnrichesIdentity(t *testin
 	}
 }
 
+func TestHitterAverageAndWaiverCandidatesUseCompletedHistoryAndActiveRoles(t *testing.T) {
+	database, err := OpenAt(filepath.Join(t.TempDir(), "fantasy-reads.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	_, err = database.conn.ExecContext(testContext(), `INSERT INTO players(id,mlbam_id,name,display_position,position_type,eligible_positions,mlbam_match_source,synced_at) VALUES
+(1,10,'Hitter','OF','H','OF','seed',1),(2,20,'Pitcher','SP','P','SP','seed',1);
+INSERT INTO mlbam_season_stats(player_id,season,stat_group,g,pa,ab,h,hr,rbi,r,sb,bb,hbp,tb,ip,gs,synced_at) VALUES
+(1,2021,'hitting',100,400,350,100,20,70,65,10,40,5,170,0,0,1),
+(1,2022,'hitting',62,248,210,60,10,40,35,5,30,3,100,0,0,1),
+(1,2026,'hitting',10,40,35,9,1,5,4,0,4,0,12,0,0,1),
+(2,2026,'pitching',12,0,0,0,0,0,0,0,0,0,0,60,10,1);
+INSERT INTO mlb_team_active_rosters(team_abbr,mlbam_id,primary_type,status,fetched_at) VALUES
+('NYY',10,'H','A',1),('BOS',20,'P','A',1),('TB',30,'H','D10',1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	average, err := database.HitterAverage(10, 2026)
+	if err != nil || average == nil || average.PlateAppearances != 648 || average.HomeRuns != 30 || average.BattingAverage <= 0 {
+		t.Fatalf("average=%#v err=%v", average, err)
+	}
+	missing, err := database.HitterAverage(999, 2026)
+	if err != nil || missing != nil {
+		t.Fatalf("missing=%#v err=%v", missing, err)
+	}
+	candidates, err := database.WaiverCandidates()
+	if err != nil || len(candidates) != 2 || candidates[0].Role != "H" || candidates[1].Role != "P" || candidates[1].GamesStarted != 10 {
+		t.Fatalf("candidates=%#v err=%v", candidates, err)
+	}
+}
+
 func TestMLBRosterPrefersYahooThenSeedIdentity(t *testing.T) {
 	database, err := OpenAt(filepath.Join(t.TempDir(), "identity.db"))
 	if err != nil {

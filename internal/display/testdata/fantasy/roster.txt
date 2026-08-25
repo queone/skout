@@ -1,0 +1,7 @@
+ROSTER: Operators
+SLOT  HITTER                      POS    STATUS             B    YR      PA    OBP    R   HR   RBI     SB    AVG
+OF    Ada Hitter NYY              OF     NoGame             R     5     100   .350   20    5    18      3   .280
+      TOTAL                                                             100   .350   20    5    18      3   .280
+SLOT  PITCHER                     POS    STATUS             T    YR      IP     QS    W   SV     K    ERA   WHIP
+SP    Ace Pitcher BOS             SP     NoGame             L     8    60.0      6    5    0    70   3.20   1.10
+      TOTAL                                                            60.0      6    5    0    70   3.20   1.10

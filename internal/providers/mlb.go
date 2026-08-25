@@ -212,6 +212,59 @@ type PitchingGameLogEntry struct {
 	Stat           PitchingStats
 }
 
+// HittingGameLogEntry is one hitter's normalized season game-log entry.
+type HittingGameLogEntry struct {
+	Date           string       `json:"date"`
+	GameID         int64        `json:"game_id"`
+	IsHome         bool         `json:"is_home"`
+	OpponentTeamID int64        `json:"opponent_team_id"`
+	Stat           HittingStats `json:"stat"`
+}
+
+// BoxscoreBatting contains optional same-game batting values.
+type BoxscoreBatting struct {
+	Hits        *int64 `json:"hits,omitempty"`
+	AtBats      *int64 `json:"at_bats,omitempty"`
+	Runs        *int64 `json:"runs,omitempty"`
+	HomeRuns    *int64 `json:"home_runs,omitempty"`
+	RBI         *int64 `json:"rbi,omitempty"`
+	StolenBases *int64 `json:"stolen_bases,omitempty"`
+}
+
+// BoxscorePitching contains optional same-game pitching values.
+type BoxscorePitching struct {
+	InningsPitched *string `json:"innings_pitched,omitempty"`
+	Wins           *int64  `json:"wins,omitempty"`
+	Saves          *int64  `json:"saves,omitempty"`
+	Strikeouts     *int64  `json:"strikeouts,omitempty"`
+	ERA            *string `json:"era,omitempty"`
+	WHIP           *string `json:"whip,omitempty"`
+	EarnedRuns     *int64  `json:"earned_runs,omitempty"`
+	HitsAllowed    *int64  `json:"hits_allowed,omitempty"`
+	Walks          *int64  `json:"walks,omitempty"`
+}
+
+// BoxscorePlayer is one keyed player within a game boxscore.
+type BoxscorePlayer struct {
+	PersonID int64             `json:"person_id"`
+	FullName string            `json:"full_name"`
+	Batting  *BoxscoreBatting  `json:"batting,omitempty"`
+	Pitching *BoxscorePitching `json:"pitching,omitempty"`
+}
+
+// BoxscoreTeam is one side of a game boxscore.
+type BoxscoreTeam struct {
+	BattingOrder []int64                  `json:"batting_order"`
+	Bench        []int64                  `json:"bench"`
+	Players      map[int64]BoxscorePlayer `json:"players"`
+}
+
+// Boxscore contains both clubs' normalized game records.
+type Boxscore struct {
+	Away BoxscoreTeam `json:"away"`
+	Home BoxscoreTeam `json:"home"`
+}
+
 // QualityStartIssue describes one pitcher-specific acquisition failure.
 type QualityStartIssue struct {
 	PersonID int64
@@ -422,6 +475,91 @@ func (client *MLBClient) FetchScheduleCached(date string, disk *cache.Disk) (Sch
 	return result, nil
 }
 
+// FetchBoxscore fetches one bounded MLB game boxscore.
+func (client *MLBClient) FetchBoxscore(gameID int64) (Boxscore, error) {
+	if gameID <= 0 {
+		return Boxscore{}, invalid("validate MLB identifier", "game ID must be positive")
+	}
+	type statsWire struct {
+		Batting struct {
+			Hits        *int64 `json:"hits"`
+			AtBats      *int64 `json:"atBats"`
+			Runs        *int64 `json:"runs"`
+			HomeRuns    *int64 `json:"homeRuns"`
+			RBI         *int64 `json:"rbi"`
+			StolenBases *int64 `json:"stolenBases"`
+		} `json:"batting"`
+		Pitching struct {
+			InningsPitched *string `json:"inningsPitched"`
+			Wins           *int64  `json:"wins"`
+			Saves          *int64  `json:"saves"`
+			Strikeouts     *int64  `json:"strikeOuts"`
+			ERA            *string `json:"era"`
+			WHIP           *string `json:"whip"`
+			EarnedRuns     *int64  `json:"earnedRuns"`
+			Hits           *int64  `json:"hits"`
+			Walks          *int64  `json:"baseOnBalls"`
+		} `json:"pitching"`
+	}
+	type playerWire struct {
+		Person struct {
+			ID       int64  `json:"id"`
+			FullName string `json:"fullName"`
+		} `json:"person"`
+		Stats statsWire `json:"stats"`
+	}
+	type teamWire struct {
+		BattingOrder []int64               `json:"battingOrder"`
+		Bench        []int64               `json:"bench"`
+		Players      map[string]playerWire `json:"players"`
+	}
+	var response struct {
+		Teams *struct {
+			Away teamWire `json:"away"`
+			Home teamWire `json:"home"`
+		} `json:"teams"`
+	}
+	if err := client.getJSON("fetch MLB boxscore", []string{"game", strconv.FormatInt(gameID, 10), "boxscore"}, nil, &response); err != nil {
+		return Boxscore{}, err
+	}
+	if response.Teams == nil {
+		return Boxscore{}, invalid("fetch MLB boxscore", "teams envelope is absent")
+	}
+	if response.Teams.Away.Players == nil || response.Teams.Home.Players == nil {
+		return Boxscore{}, invalid("fetch MLB boxscore", "team player maps are absent")
+	}
+	convert := func(input teamWire) BoxscoreTeam {
+		output := BoxscoreTeam{Players: make(map[int64]BoxscorePlayer)}
+		for _, id := range input.BattingOrder {
+			if id > 0 {
+				output.BattingOrder = append(output.BattingOrder, id)
+			}
+		}
+		for _, id := range input.Bench {
+			if id > 0 {
+				output.Bench = append(output.Bench, id)
+			}
+		}
+		for _, value := range input.Players {
+			if value.Person.ID <= 0 {
+				continue
+			}
+			player := BoxscorePlayer{PersonID: value.Person.ID, FullName: value.Person.FullName}
+			batting := value.Stats.Batting
+			if batting.Hits != nil || batting.AtBats != nil || batting.Runs != nil || batting.HomeRuns != nil || batting.RBI != nil || batting.StolenBases != nil {
+				player.Batting = &BoxscoreBatting{batting.Hits, batting.AtBats, batting.Runs, batting.HomeRuns, batting.RBI, batting.StolenBases}
+			}
+			pitching := value.Stats.Pitching
+			if pitching.InningsPitched != nil || pitching.Wins != nil || pitching.Saves != nil || pitching.Strikeouts != nil || pitching.ERA != nil || pitching.WHIP != nil || pitching.EarnedRuns != nil || pitching.Hits != nil || pitching.Walks != nil {
+				player.Pitching = &BoxscorePitching{pitching.InningsPitched, pitching.Wins, pitching.Saves, pitching.Strikeouts, pitching.ERA, pitching.WHIP, pitching.EarnedRuns, pitching.Hits, pitching.Walks}
+			}
+			output.Players[player.PersonID] = player
+		}
+		return output
+	}
+	return Boxscore{Away: convert(response.Teams.Away), Home: convert(response.Teams.Home)}, nil
+}
+
 // FetchBulkHittingStats fetches complete season hitting splits.
 func (client *MLBClient) FetchBulkHittingStats(season int64, gameType string) ([]BulkHittingSplit, error) {
 	var response struct {
@@ -454,6 +592,113 @@ func (client *MLBClient) FetchBulkPitchingStats(season int64, gameType string) (
 	return (*response.Stats)[0].Splits, nil
 }
 
+// FetchHittingStatsByDateRange fetches regular-season hitting splits for an inclusive range.
+func (client *MLBClient) FetchHittingStatsByDateRange(season int64, startDate, endDate string) ([]BulkHittingSplit, error) {
+	if err := validateDateRange(season, startDate, endDate); err != nil {
+		return nil, err
+	}
+	var response struct {
+		Stats *[]struct {
+			Splits []BulkHittingSplit `json:"splits"`
+		} `json:"stats"`
+	}
+	if err := client.getJSON("fetch MLB hitting stats", []string{"stats"}, rangeQuery(season, startDate, endDate, "hitting"), &response); err != nil {
+		return nil, err
+	}
+	if response.Stats == nil {
+		return nil, invalid("fetch MLB hitting stats", "stats envelope is absent")
+	}
+	if len(*response.Stats) == 0 {
+		return []BulkHittingSplit{}, nil
+	}
+	rows := (*response.Stats)[0].Splits
+	for _, row := range rows {
+		if row.Player.PersonID <= 0 {
+			return nil, invalid("fetch MLB hitting stats", "split player identity is absent")
+		}
+	}
+	return rows, nil
+}
+
+// FetchPitchingStatsByDateRange fetches regular-season pitching splits for an inclusive range.
+func (client *MLBClient) FetchPitchingStatsByDateRange(season int64, startDate, endDate string) ([]BulkPitchingSplit, error) {
+	if err := validateDateRange(season, startDate, endDate); err != nil {
+		return nil, err
+	}
+	var response struct {
+		Stats *[]struct {
+			Splits []BulkPitchingSplit `json:"splits"`
+		} `json:"stats"`
+	}
+	if err := client.getJSON("fetch MLB pitching stats", []string{"stats"}, rangeQuery(season, startDate, endDate, "pitching"), &response); err != nil {
+		return nil, err
+	}
+	if response.Stats == nil {
+		return nil, invalid("fetch MLB pitching stats", "stats envelope is absent")
+	}
+	if len(*response.Stats) == 0 {
+		return []BulkPitchingSplit{}, nil
+	}
+	rows := (*response.Stats)[0].Splits
+	for _, row := range rows {
+		if row.Player.PersonID <= 0 {
+			return nil, invalid("fetch MLB pitching stats", "split player identity is absent")
+		}
+	}
+	return rows, nil
+}
+
+// FetchHitterGameLog fetches one hitter's chronological season game log.
+func (client *MLBClient) FetchHitterGameLog(personID, season int64) ([]HittingGameLogEntry, error) {
+	if personID <= 0 {
+		return nil, invalid("validate MLB identifier", "person ID must be positive")
+	}
+	if err := validateSeason(season); err != nil {
+		return nil, err
+	}
+	var response struct {
+		Stats *[]struct {
+			Splits []struct {
+				Date string       `json:"date"`
+				Stat HittingStats `json:"stat"`
+				Game struct {
+					GameID int64 `json:"gamePk"`
+				} `json:"game"`
+				IsHome   bool `json:"isHome"`
+				Opponent struct {
+					TeamID int64 `json:"id"`
+				} `json:"opponent"`
+			} `json:"splits"`
+		} `json:"stats"`
+	}
+	if err := client.getJSON("fetch MLB hitter game log", []string{"people", strconv.FormatInt(personID, 10), "stats"}, url.Values{
+		"stats": {"gameLog"}, "season": {strconv.FormatInt(season, 10)}, "group": {"hitting"},
+	}, &response); err != nil {
+		return nil, err
+	}
+	if response.Stats == nil {
+		return nil, invalid("fetch MLB hitter game log", "stats envelope is absent")
+	}
+	if len(*response.Stats) == 0 {
+		return []HittingGameLogEntry{}, nil
+	}
+	rows := (*response.Stats)[0].Splits
+	output := make([]HittingGameLogEntry, 0, len(rows))
+	for _, row := range rows {
+		if !validMLBDate(row.Date) || row.Game.GameID <= 0 || row.Opponent.TeamID <= 0 {
+			return nil, invalid("fetch MLB hitter game log", "split game identity is incomplete")
+		}
+		output = append(output, HittingGameLogEntry{row.Date, row.Game.GameID, row.IsHome, row.Opponent.TeamID, row.Stat})
+	}
+	sort.Slice(output, func(i, j int) bool {
+		if output[i].Date != output[j].Date {
+			return output[i].Date < output[j].Date
+		}
+		return output[i].GameID < output[j].GameID
+	})
+	return output, nil
+}
+
 // FetchPitcherGameLog fetches one pitcher's chronological season game log.
 func (client *MLBClient) FetchPitcherGameLog(personID, season int64) ([]PitchingGameLogEntry, error) {
 	if personID <= 0 {
@@ -484,12 +729,18 @@ func (client *MLBClient) FetchPitcherGameLog(personID, season int64) ([]Pitching
 	}, &response); err != nil {
 		return nil, err
 	}
-	if response.Stats == nil || len(*response.Stats) == 0 {
+	if response.Stats == nil {
+		return nil, invalid("fetch MLB pitcher game log", "stats envelope is absent")
+	}
+	if len(*response.Stats) == 0 {
 		return []PitchingGameLogEntry{}, nil
 	}
 	rows := (*response.Stats)[0].Splits
 	output := make([]PitchingGameLogEntry, 0, len(rows))
 	for _, row := range rows {
+		if !validMLBDate(row.Date) || row.Game.GameID <= 0 || row.Opponent.TeamID <= 0 {
+			return nil, invalid("fetch MLB pitcher game log", "split game identity is incomplete")
+		}
 		output = append(output, PitchingGameLogEntry{
 			Date:           row.Date,
 			GameID:         row.Game.GameID,
@@ -498,6 +749,12 @@ func (client *MLBClient) FetchPitcherGameLog(personID, season int64) ([]Pitching
 			Stat:           row.Stat,
 		})
 	}
+	sort.Slice(output, func(i, j int) bool {
+		if output[i].Date != output[j].Date {
+			return output[i].Date < output[j].Date
+		}
+		return output[i].GameID < output[j].GameID
+	})
 	return output, nil
 }
 
@@ -669,7 +926,7 @@ func decodeSchedule(payload []byte) ([]ScheduleGame, error) {
 	if response.Dates == nil {
 		return nil, invalid("fetch MLB schedule", "dates envelope is absent")
 	}
-	var output []ScheduleGame
+	output := make([]ScheduleGame, 0)
 	for _, date := range *response.Dates {
 		for _, game := range date.Games {
 			if game.GameID <= 0 || game.Teams.Away.Team.ID <= 0 || game.Teams.Home.Team.ID <= 0 {
@@ -747,6 +1004,8 @@ func validateDate(value string) error {
 	return nil
 }
 
+func validMLBDate(value string) bool { return validateDate(value) == nil }
+
 func validateDateRange(season int64, startDate, endDate string) error {
 	if err := validateSeason(season); err != nil {
 		return err
@@ -761,6 +1020,14 @@ func validateDateRange(season int64, startDate, endDate string) error {
 		return invalid("validate MLB date range", "start date must not follow end date")
 	}
 	return nil
+}
+
+func rangeQuery(season int64, startDate, endDate, group string) url.Values {
+	return url.Values{
+		"stats": {"byDateRange"}, "group": {group}, "gameType": {"R"},
+		"season": {strconv.FormatInt(season, 10)}, "playerPool": {"All"}, "limit": {"2000"},
+		"startDate": {startDate}, "endDate": {endDate},
+	}
 }
 
 func parseInningsPitched(value string) (float64, bool) {

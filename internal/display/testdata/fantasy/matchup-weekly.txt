@@ -1,0 +1,13 @@
+MATCHUP WEEK: 7 of 26 (Mon aug-24 / Sun aug-30)
+STALE — Yahoo unavailable; showing the last complete matchup snapshot
+Operators (4-2-0 | 1st) - 0 rem (0/0)                                         Rivals (2-4-0 | 2nd) - 0 rem (0/0)
+HITTER              STATUS             H/AB   R  HR RBI   SB    AVG    SLOT   HITTER              STATUS             H/AB   R  HR RBI   SB    AVG
+A Hitter NYY        NoGame              2/4   1   0   0    0   .500    OF     G Hitter BOS        NoGame              1/4   0   0   0    0   .250
+                                          —   5   —   —    —   .300                                                     —   3   —   —    —   .250
+
+PITCHER             STATUS                IP   W  SV   K   ERA  WHIP    SLOT   PITCHER             STATUS                IP   W  SV   K   ERA  WHIP
+                                          —   —   —   —     —     —                                                     —   —   —   —     —     —
+
+SUMMARY
+W/T/L        2 / 1 / 0
+MY ODDS      Ace v Rival  NYY@BOS  ██████░░░░ 60%

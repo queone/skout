@@ -1,0 +1,10 @@
+PITCHER                 POS    STATUS    B  AGE    YR
+Ace Pitcher BOS         SP     —         L    —     8
+
+SOURCE      FBV  WHIFF%    CH%    GB%     K%    BB%  OWNER
+SAVANT    96.5       —      —      —      —      —  Operators
+
+SPLIT         IP   QS    W   SV     K    ERA   WHIP
+CURRENT     60.0    6    5    0    70   3.20   1.10
+GAME LOG   OPP      STATUS      IP    W   SV    K    ERA   WHIP
+Aug 24     vs TB               6.0    1    0    7   3.00   1.00

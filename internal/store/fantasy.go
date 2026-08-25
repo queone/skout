@@ -69,21 +69,8 @@ type StoredFantasyCategory struct {
 	Sequence     int64
 }
 
-// StoredFantasyPlayer contains durable Yahoo identity and ownership fields.
-type StoredFantasyPlayer struct {
-	YahooPlayerID     int64
-	MLBAMID           *int64
-	Name              string
-	MLBTeam           string
-	PositionType      string
-	EligiblePositions string
-	InjuryStatus      string
-	YahooRank         *int64
-	PercentOwned      *float64
-	PercentageStarted *float64
-	Owner             *string
-	Slot              string
-}
+// StoredFantasyPlayer is the shared rich fantasy-player read model.
+type StoredFantasyPlayer = domain.StoredFantasyPlayer
 
 // IdentityCandidate is one MLB identity eligible for exact reconciliation.
 type IdentityCandidate struct {
@@ -345,14 +332,36 @@ func (store *Store) FantasyPositions(leagueKey string) ([]PositionWrite, error) 
 
 // FantasyPlayers reads rostered and free-agent players for one league.
 func (store *Store) FantasyPlayers(leagueKey string) ([]StoredFantasyPlayer, error) {
-	rows, err := store.conn.QueryContext(context.Background(), `SELECT p.yahoo_player_id,p.mlbam_id,p.name,COALESCE(p.mlb_team,''),
-COALESCE(p.position_type,''),COALESCE(p.eligible_positions,''),COALESCE(p.status,''),p.yahoo_rank,
-p.percent_owned,p.pct_started,t.name,COALESCE(s.slot_position,'')
+	if err := validateIdentity("read fantasy players", "league key", leagueKey); err != nil {
+		return nil, err
+	}
+	rows, err := store.conn.QueryContext(context.Background(), `SELECT p.yahoo_player_id,p.mlbam_id,p.name,COALESCE(p.mlb_team,''),COALESCE(p.position_type,''),COALESCE(p.eligible_positions,p.display_position,''),
+CASE WHEN COALESCE(p.status,'') NOT IN ('','IL') THEN p.status
+WHEN (SELECT r.status FROM mlb_team_active_rosters r WHERE r.mlbam_id=p.mlbam_id AND r.primary_type=CASE WHEN p.position_type='P' THEN 'P' ELSE 'H' END LIMIT 1)='D7' THEN 'IL7'
+WHEN (SELECT r.status FROM mlb_team_active_rosters r WHERE r.mlbam_id=p.mlbam_id AND r.primary_type=CASE WHEN p.position_type='P' THEN 'P' ELSE 'H' END LIMIT 1)='D10' THEN 'IL10'
+WHEN (SELECT r.status FROM mlb_team_active_rosters r WHERE r.mlbam_id=p.mlbam_id AND r.primary_type=CASE WHEN p.position_type='P' THEN 'P' ELSE 'H' END LIMIT 1)='D15' THEN 'IL15'
+WHEN (SELECT r.status FROM mlb_team_active_rosters r WHERE r.mlbam_id=p.mlbam_id AND r.primary_type=CASE WHEN p.position_type='P' THEN 'P' ELSE 'H' END LIMIT 1)='D60' THEN 'IL60' ELSE COALESCE(p.status,'') END,
+p.yahoo_rank,p.percent_owned,t.name,ys.slot_position,
+CASE WHEN p.position_type IN ('H','B') THEN COALESCE(h.pa,0) ELSE 0 END,CASE WHEN p.position_type IN ('H','B') THEN COALESCE(h.obp,0) ELSE 0 END,CASE WHEN p.position_type IN ('H','B') THEN COALESCE(h.r,0) ELSE 0 END,CASE WHEN p.position_type IN ('H','B') THEN COALESCE(h.hr,0) ELSE 0 END,CASE WHEN p.position_type IN ('H','B') THEN COALESCE(h.rbi,0) ELSE 0 END,CASE WHEN p.position_type IN ('H','B') THEN COALESCE(h.sb,0) ELSE 0 END,CASE WHEN p.position_type IN ('H','B') THEN COALESCE(h.avg,0) ELSE 0 END,
+CASE WHEN p.position_type='P' THEN COALESCE(q.ip,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(q.qs,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(q.w,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(q.sv,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(q.k,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(q.era,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(q.whip,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(p.pitch_hand,'') ELSE COALESCE(p.bat_side,'') END,COALESCE(NULLIF(p.injury_note,''),p.mlbam_injury_note,''),COALESCE(p.birth_date,''),
+CASE WHEN p.position_type IN ('H','B') THEN sh.xwoba END,CASE WHEN p.position_type IN ('H','B') THEN sh.exit_velo_avg END,CASE WHEN p.position_type IN ('H','B') THEN sh.barrel_pct END,CASE WHEN p.position_type IN ('H','B') THEN sh.hard_hit_pct END,CASE WHEN p.position_type IN ('H','B') THEN sh.strikeout_pct END,CASE WHEN p.position_type IN ('H','B') THEN sh.walk_pct END,CASE WHEN p.position_type IN ('H','B') THEN sh.sprint_speed END,CASE WHEN p.position_type IN ('H','B') THEN sh.ops END,
+CASE WHEN p.position_type='P' THEN sp.fastball_velo END,CASE WHEN p.position_type='P' THEN sp.whiff_pct END,CASE WHEN p.position_type='P' THEN sp.chase_pct END,CASE WHEN p.position_type='P' THEN sp.gb_pct END,CASE WHEN p.position_type='P' THEN sp.strikeout_pct END,CASE WHEN p.position_type='P' THEN sp.walk_pct END,COALESCE(p.is_closer,0),COALESCE(p.pct_started,0),p.ecr,CASE WHEN p.position_type IN ('H','B') THEN fg.fb_pct END,CASE WHEN p.position_type IN ('H','B') THEN fg.hr_fb_pct END,
+CASE WHEN p.position_type IN ('H','B') THEN COALESCE(h.pa,0) ELSE 0 END,CASE WHEN p.position_type IN ('H','B') THEN COALESCE(h.so_bat,0) ELSE 0 END,CASE WHEN p.position_type IN ('H','B') THEN COALESCE(h.bb,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(q.bf,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(q.k,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(q.bb_pit,0) ELSE 0 END,
+CASE WHEN p.position_type IN ('H','B') THEN COALESCE(sh.pa,0) ELSE 0 END,CASE WHEN p.position_type IN ('H','B') THEN COALESCE(sh.bbe,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(sp.pa,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(sp.bbe,0) ELSE 0 END,
+CASE WHEN p.position_type IN ('H','B') THEN COALESCE(hp.pa,0) ELSE 0 END,CASE WHEN p.position_type IN ('H','B') THEN COALESCE(hp.so_bat,0) ELSE 0 END,CASE WHEN p.position_type IN ('H','B') THEN COALESCE(hp.bb,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(qp.bf,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(qp.k,0) ELSE 0 END,CASE WHEN p.position_type='P' THEN COALESCE(qp.bb_pit,0) ELSE 0 END,
+COALESCE((SELECT MAX(g) FROM mlbam_season_stats WHERE stat_group='hitting' AND season=(SELECT MAX(season) FROM mlbam_season_stats)),0)
 FROM players p
-LEFT JOIN yahoo_roster_slots s ON s.player_id=p.id AND s.team_key IN (SELECT team_key FROM yahoo_teams WHERE league_key=?)
-LEFT JOIN yahoo_teams t ON t.team_key=s.team_key
-LEFT JOIN yahoo_free_agents f ON f.player_id=p.id AND f.league_key=?
-WHERE s.player_id IS NOT NULL OR f.player_id IS NOT NULL
+LEFT JOIN yahoo_roster_slots ys ON ys.player_id=p.id AND ys.slot_position<>'--' AND ys.team_key IN (SELECT team_key FROM yahoo_teams WHERE league_key=?)
+LEFT JOIN yahoo_teams t ON t.team_key=ys.team_key
+LEFT JOIN yahoo_free_agents fa ON fa.player_id=p.id AND fa.league_key=?
+LEFT JOIN mlbam_season_stats h ON h.player_id=(SELECT hs.player_id FROM mlbam_season_stats hs JOIN players hp0 ON hp0.id=hs.player_id WHERE hp0.mlbam_id=p.mlbam_id AND hp0.position_type IN ('H','B') AND hs.stat_group='hitting' AND hs.season=(SELECT MAX(season) FROM mlbam_season_stats) ORDER BY CASE WHEN hp0.mlbam_match_source='seed' THEN 0 ELSE 1 END DESC,hs.synced_at DESC,hs.player_id LIMIT 1) AND h.stat_group='hitting' AND h.season=(SELECT MAX(season) FROM mlbam_season_stats)
+LEFT JOIN mlbam_season_stats q ON q.player_id=(SELECT qs.player_id FROM mlbam_season_stats qs JOIN players qp0 ON qp0.id=qs.player_id WHERE qp0.mlbam_id=p.mlbam_id AND qp0.position_type='P' AND qs.stat_group='pitching' AND qs.season=(SELECT MAX(season) FROM mlbam_season_stats) ORDER BY CASE WHEN qp0.mlbam_match_source='seed' THEN 0 ELSE 1 END DESC,qs.synced_at DESC,qs.player_id LIMIT 1) AND q.stat_group='pitching' AND q.season=(SELECT MAX(season) FROM mlbam_season_stats)
+LEFT JOIN mlbam_season_stats hp ON hp.player_id=h.player_id AND hp.stat_group='hitting' AND hp.season=h.season-1
+LEFT JOIN mlbam_season_stats qp ON qp.player_id=q.player_id AND qp.stat_group='pitching' AND qp.season=q.season-1
+LEFT JOIN statcast_seasons sh ON sh.player_id=(SELECT p2.id FROM players p2 WHERE p2.mlbam_id=p.mlbam_id AND p2.position_type IN ('H','B') ORDER BY CASE WHEN p2.mlbam_match_source='seed' THEN 0 ELSE 1 END DESC,p2.yahoo_player_id IS NULL,p2.id LIMIT 1) AND sh.stat_group='batting' AND sh.season=(SELECT MAX(season) FROM statcast_seasons)
+LEFT JOIN statcast_seasons sp ON sp.player_id=(SELECT p2.id FROM players p2 WHERE p2.mlbam_id=p.mlbam_id AND p2.position_type='P' ORDER BY CASE WHEN p2.mlbam_match_source='seed' THEN 0 ELSE 1 END DESC,p2.yahoo_player_id IS NULL,p2.id LIMIT 1) AND sp.stat_group='pitching' AND sp.season=(SELECT MAX(season) FROM statcast_seasons)
+LEFT JOIN fangraphs_batted_ball fg ON fg.player_id=(SELECT p2.id FROM players p2 WHERE p2.mlbam_id=p.mlbam_id AND p2.position_type IN ('H','B') ORDER BY CASE WHEN p2.mlbam_match_source='seed' THEN 0 ELSE 1 END DESC,p2.yahoo_player_id IS NULL,p2.id LIMIT 1) AND fg.season=(SELECT MAX(season) FROM fangraphs_batted_ball)
+WHERE p.yahoo_player_id IS NOT NULL AND (t.team_key IS NOT NULL OR fa.player_id IS NOT NULL)
 ORDER BY COALESCE(p.yahoo_rank,999999),p.name,p.yahoo_player_id`, leagueKey, leagueKey)
 	if err != nil {
 		return nil, operationError("read fantasy players", store.path, err)
@@ -361,31 +370,23 @@ ORDER BY COALESCE(p.yahoo_rank,999999),p.name,p.yahoo_player_id`, leagueKey, lea
 	var output []StoredFantasyPlayer
 	for rows.Next() {
 		var row StoredFantasyPlayer
-		var mlbam sql.NullInt64
-		var rank sql.NullInt64
-		var owned, started sql.NullFloat64
-		var owner sql.NullString
-		if err := rows.Scan(&row.YahooPlayerID, &mlbam, &row.Name, &row.MLBTeam, &row.PositionType, &row.EligiblePositions, &row.InjuryStatus, &rank, &owned, &started, &owner, &row.Slot); err != nil {
+		if err := rows.Scan(
+			&row.YahooPlayerID, &row.MLBAMID, &row.Name, &row.Team, &row.Role, &row.Positions, &row.Status,
+			&row.Rank, &row.PercentOwned, &row.Owner, &row.Slot,
+			&row.Batting[0], &row.Batting[1], &row.Batting[2], &row.Batting[3], &row.Batting[4], &row.Batting[5], &row.Batting[6],
+			&row.Pitching[0], &row.Pitching[1], &row.Pitching[2], &row.Pitching[3], &row.Pitching[4], &row.Pitching[5], &row.Pitching[6],
+			&row.Hand, &row.InjuryNote, &row.BirthDate,
+			&row.HittingAdvanced[0], &row.HittingAdvanced[1], &row.HittingAdvanced[2], &row.HittingAdvanced[3], &row.HittingAdvanced[4], &row.HittingAdvanced[5], &row.HittingAdvanced[6], &row.HittingAdvanced[7],
+			&row.PitchingAdvanced[0], &row.PitchingAdvanced[1], &row.PitchingAdvanced[2], &row.PitchingAdvanced[3], &row.PitchingAdvanced[4], &row.PitchingAdvanced[5],
+			&row.IsCloser, &row.PercentageStarted, &row.ExpertConsensusRank, &row.FanGraphsBattedBall[0], &row.FanGraphsBattedBall[1],
+			&row.PQSCounting[0], &row.PQSCounting[1], &row.PQSCounting[2], &row.PQSCounting[3], &row.PQSCounting[4], &row.PQSCounting[5],
+			&row.StatcastSamples[0], &row.StatcastSamples[1], &row.StatcastSamples[2], &row.StatcastSamples[3],
+			&row.PQSPriorCounting[0], &row.PQSPriorCounting[1], &row.PQSPriorCounting[2], &row.PQSPriorCounting[3], &row.PQSPriorCounting[4], &row.PQSPriorCounting[5], &row.LeagueGamesPlayed,
+		); err != nil {
 			return nil, operationError("read fantasy players", store.path, err)
 		}
-		if mlbam.Valid {
-			value := mlbam.Int64
-			row.MLBAMID = &value
-		}
-		if rank.Valid {
-			value := rank.Int64
-			row.YahooRank = &value
-		}
-		if owned.Valid {
-			value := owned.Float64
-			row.PercentOwned = &value
-		}
-		if started.Valid {
-			value := started.Float64
-			row.PercentageStarted = &value
-		}
-		if owner.Valid {
-			value := domain.CleanFantasyTeamName(owner.String)
+		if row.Owner != nil {
+			value := domain.CleanFantasyTeamName(*row.Owner)
 			row.Owner = &value
 		}
 		output = append(output, row)

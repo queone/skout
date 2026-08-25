@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -21,6 +23,70 @@ func TestCompleteCommandGrammarProvidesAllHelpForms(t *testing.T) {
 			if code != 0 || stdout.Len() == 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), command.description) || !strings.Contains(stdout.String(), "Usage:") {
 				t.Errorf("%s %s code=%d stdout=%q stderr=%q", command.name, flag, code, stdout.String(), stderr.String())
 			}
+		}
+	}
+}
+
+func TestFantasyContractDispatchesEveryValueOnce(t *testing.T) {
+	type contractCase struct {
+		Name   string   `json:"name"`
+		Args   []string `json:"args"`
+		Code   int      `json:"code"`
+		Stdout string   `json:"stdout"`
+		Stderr string   `json:"stderr"`
+	}
+	data, err := os.ReadFile("testdata/fantasy-contract.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []contractCase
+	if err := json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range cases {
+		t.Run(test.Name, func(t *testing.T) {
+			calls := 0
+			handlers := Handlers{
+				Matchup: func(league, team string, week int, weekly bool, day string, debug bool) (string, error) {
+					calls++
+					return strings.Join([]string{"m", league, team, strconv.Itoa(week), boolText(weekly), day, boolText(debug)}, ":") + "\n", nil
+				},
+				Roster: func(league, team string, debug bool) (string, error) {
+					calls++
+					return strings.Join([]string{"r", league, team, boolText(debug)}, ":") + "\n", nil
+				},
+				RosterTotals: func(league, weekly string, debug bool) (string, error) {
+					calls++
+					return strings.Join([]string{"rt", league, weekly, boolText(debug)}, ":") + "\n", nil
+				},
+				Hitters: func(league, argument, sort, position string, waiver, debug bool) (string, error) {
+					calls++
+					return strings.Join([]string{"h", league, argument, sort, position, boolText(waiver), boolText(debug)}, ":") + "\n", nil
+				},
+				Pitchers: func(league, argument, sort, position string, waiver, debug bool) (string, error) {
+					calls++
+					if argument == "fail" {
+						return "", errors.New("injected pitcher failure")
+					}
+					return strings.Join([]string{"p", league, argument, sort, position, boolText(waiver), boolText(debug)}, ":") + "\n", nil
+				},
+			}
+			var stdout, stderr bytes.Buffer
+			code := Run(test.Args, "0.4.0", Context{Stdout: &stdout, Stderr: &stderr}, handlers)
+			if code != test.Code || stdout.String() != test.Stdout || stderr.String() != test.Stderr || calls != 1 {
+				t.Fatalf("code=%d stdout=%q stderr=%q calls=%d", code, stdout.String(), stderr.String(), calls)
+			}
+		})
+	}
+}
+
+func TestMatchupSyntaxRejectsBeforeHandler(t *testing.T) {
+	for _, args := range [][]string{{"m", "-w", "0"}, {"m", "-D", "Feb-30"}, {"m", "-W", "-D", "Apr-01"}} {
+		called := false
+		var stdout, stderr bytes.Buffer
+		code := Run(args, "0.4.0", Context{Stdout: &stdout, Stderr: &stderr}, Handlers{Matchup: func(string, string, int, bool, string, bool) (string, error) { called = true; return "", nil }})
+		if code != 2 || called || stdout.Len() != 0 || !strings.Contains(stderr.String(), "error:") {
+			t.Fatalf("args=%v code=%d called=%v stdout=%q stderr=%q", args, code, called, stdout.String(), stderr.String())
 		}
 	}
 }
@@ -79,7 +145,7 @@ func TestRootHelpAndGlossaryPlainBehaviorRemainFrozen(t *testing.T) {
 	}
 	for _, args := range [][]string{nil, {"-h"}, {"-?"}, {"--help"}} {
 		var stdout, stderr bytes.Buffer
-		code := Run(args, "0.4.0", Context{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}, Handlers{})
+		code := Run(args, "0.5.0", Context{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}, Handlers{})
 		if code != 0 || !bytes.Equal(stdout.Bytes(), want) || stderr.Len() != 0 {
 			t.Errorf("root %v code=%d stdout differs=%v stderr=%q", args, code, !bytes.Equal(stdout.Bytes(), want), stderr.String())
 		}

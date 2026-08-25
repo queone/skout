@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/queone/skout/internal/app"
 	"github.com/queone/skout/internal/glossary"
@@ -32,12 +33,17 @@ type Context struct {
 
 // Handlers contains injectable executable application boundaries.
 type Handlers struct {
-	Fetch     func(host, path string) (string, error)
-	Status    func(league string) (string, error)
-	Sync      func(league, team string, debug bool, output io.Writer) (string, error)
-	Teams     func(team string, force, debug bool) (string, error)
-	Totals    func(force, debug bool) (string, error)
-	Probables func(force, debug bool) (string, error)
+	Fetch        func(host, path string) (string, error)
+	Status       func(league string) (string, error)
+	Sync         func(league, team string, debug bool, output io.Writer) (string, error)
+	Matchup      func(league, team string, week int, weekly bool, day string, debug bool) (string, error)
+	Teams        func(team string, force, debug bool) (string, error)
+	Totals       func(force, debug bool) (string, error)
+	Probables    func(force, debug bool) (string, error)
+	Roster       func(league, team string, debug bool) (string, error)
+	RosterTotals func(league, weekly string, debug bool) (string, error)
+	Hitters      func(league, argument, sort, position string, waiver, debug bool) (string, error)
+	Pitchers     func(league, argument, sort, position string, waiver, debug bool) (string, error)
 }
 
 type flagSpec struct {
@@ -59,14 +65,14 @@ var commands = []commandSpec{
 	{name: "st", label: "st", description: "Show status"},
 	{name: "sync", label: "sync", description: "Synchronize the selected league", flags: []flagSpec{{"-T", "--team", "TEAM", "Select the primary fantasy team", false}}},
 	{name: "reset", label: "reset", description: "Delete the local skout database", deferred: true},
-	{name: "m", label: "m [team]", description: "Show a daily or weekly matchup", positional: "NAME", maximum: 1, flags: []flagSpec{{"-w", "--week", "WEEK", "Show a specific matchup week", false}, {"-W", "--weekly", "", "Show weekly running totals", false}, {"-D", "--day", "MMM-DD", "Show stats for a specific day", false}}, deferred: true},
+	{name: "m", label: "m [team]", description: "Show a daily or weekly matchup", positional: "NAME", maximum: 1, flags: []flagSpec{{"-w", "--week", "WEEK", "Show a specific matchup week", false}, {"-W", "--weekly", "", "Show weekly running totals", false}, {"-D", "--day", "MMM-DD", "Show stats for a specific day", false}}},
 	{name: "t", label: "t [team]", description: "Show MLB 40-man rosters", positional: "TEAM", maximum: 1, flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
 	{name: "tt", label: "tt", description: "Show MLB standings and team totals", flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
 	{name: "sp", label: "sp", description: "Show the three-day probable-pitcher slate", flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
-	{name: "r", label: "r [name]", description: "Show a fantasy roster", positional: "NAME", maximum: 1, deferred: true},
-	{name: "rt", label: "rt", description: "Show fantasy roster totals", flags: []flagSpec{{"-w", "--weekly", "WEEK|DATE", "Show current or selected weekly totals", true}}, deferred: true},
-	{name: "h", label: "h [N|name]", description: "Browse hitters or show a player", positional: "N|NAME", maximum: 1, flags: playerFlags(), deferred: true},
-	{name: "p", label: "p [N|name]", description: "Browse pitchers or show a player", positional: "N|NAME", maximum: 1, flags: playerFlags(), deferred: true},
+	{name: "r", label: "r [name]", description: "Show a fantasy roster", positional: "NAME", maximum: 1},
+	{name: "rt", label: "rt", description: "Show fantasy roster totals", flags: []flagSpec{{"-w", "--weekly", "WEEK|DATE", "Show current or selected weekly totals", true}}},
+	{name: "h", label: "h [N|name]", description: "Browse hitters or show a player", positional: "N|NAME", maximum: 1, flags: playerFlags()},
+	{name: "p", label: "p [N|name]", description: "Browse pitchers or show a player", positional: "N|NAME", maximum: 1, flags: playerFlags()},
 	{name: "i", label: "i [term]", description: "Look up a term in the skout glossary", positional: "TERM", maximum: 1, aliases: []string{"whatis"}},
 }
 
@@ -87,6 +93,22 @@ func ProductionHandlers(version string, context Context) Handlers {
 		service.DebugOutput = context.Stderr
 		return run(service)
 	}
+	withFantasy := func(league string, run func(*app.FantasyService) (string, error)) (string, error) {
+		service, err := app.NewProductionFantasyService(version, league, mode)
+		if err != nil {
+			return "", err
+		}
+		defer service.Close()
+		return run(service)
+	}
+	withMatchup := func(league string, run func(*app.MatchupService) (string, error)) (string, error) {
+		service, err := app.NewProductionMatchupService(version, league, mode)
+		if err != nil {
+			return "", err
+		}
+		defer service.Close()
+		return run(service)
+	}
 	return Handlers{
 		Fetch:  func(host, path string) (string, error) { return app.FetchProduction(version, host, path) },
 		Status: func(league string) (string, error) { return app.StatusProduction(league, mode) },
@@ -97,6 +119,11 @@ func ProductionHandlers(version string, context Context) Handlers {
 				InputTerminal: context.StdinIsTerminal, PromptTerminal: context.StderrIsTerminal,
 			})
 		},
+		Matchup: func(league, team string, week int, weekly bool, day string, _ bool) (string, error) {
+			return withMatchup(league, func(service *app.MatchupService) (string, error) {
+				return service.Matchup(app.MatchupOptions{Team: team, Week: week, Weekly: weekly, Day: day})
+			})
+		},
 		Teams: func(team string, force, debug bool) (string, error) {
 			return withMLB(debug, func(service *app.MLBService) (string, error) { return service.Teams(team, force) })
 		},
@@ -105,6 +132,22 @@ func ProductionHandlers(version string, context Context) Handlers {
 		},
 		Probables: func(force, debug bool) (string, error) {
 			return withMLB(debug, func(service *app.MLBService) (string, error) { return service.Probables(force) })
+		},
+		Roster: func(league, team string, _ bool) (string, error) {
+			return withFantasy(league, func(service *app.FantasyService) (string, error) { return service.Roster(team) })
+		},
+		RosterTotals: func(league, weekly string, _ bool) (string, error) {
+			return withFantasy(league, func(service *app.FantasyService) (string, error) { return service.Totals(weekly) })
+		},
+		Hitters: func(league, argument, sort, position string, waiver, _ bool) (string, error) {
+			return withFantasy(league, func(service *app.FantasyService) (string, error) {
+				return service.Pool("B", app.PlayerPoolOptions{Argument: argument, Sort: sort, Position: position, Waiver: waiver})
+			})
+		},
+		Pitchers: func(league, argument, sort, position string, waiver, _ bool) (string, error) {
+			return withFantasy(league, func(service *app.FantasyService) (string, error) {
+				return service.Pool("P", app.PlayerPoolOptions{Argument: argument, Sort: sort, Position: position, Waiver: waiver})
+			})
 		},
 	}
 }
@@ -215,6 +258,17 @@ func Run(args []string, version string, context Context, handlers Handlers) int 
 		} else {
 			output, err = handlers.Sync(parsed.league, parsed.values["team"], parsed.debug, context.Stdout)
 		}
+	case "m":
+		team := firstPositional(parsed.positionals)
+		week := 0
+		if parsed.values["week"] != "" {
+			week, _ = strconv.Atoi(parsed.values["week"])
+		}
+		if handlers.Matchup == nil {
+			err = fmt.Errorf("match: runtime is unavailable; reinstall skout")
+		} else {
+			output, err = handlers.Matchup(parsed.league, team, week, parsed.booleans["weekly"], parsed.values["day"], parsed.debug)
+		}
 	case "t":
 		team := ""
 		if len(parsed.positionals) > 0 {
@@ -236,6 +290,28 @@ func Run(args []string, version string, context Context, handlers Handlers) int 
 			err = fmt.Errorf("probable pitchers: runtime is unavailable; reinstall skout")
 		} else {
 			output, err = handlers.Probables(parsed.booleans["force"], parsed.debug)
+		}
+	case "r":
+		if handlers.Roster == nil {
+			err = fmt.Errorf("roster: runtime is unavailable; reinstall skout")
+		} else {
+			output, err = handlers.Roster(parsed.league, firstPositional(parsed.positionals), parsed.debug)
+		}
+	case "rt":
+		if handlers.RosterTotals == nil {
+			err = fmt.Errorf("roster totals: runtime is unavailable; reinstall skout")
+		} else {
+			output, err = handlers.RosterTotals(parsed.league, parsed.values["weekly"], parsed.debug)
+		}
+	case "h", "p":
+		handler := handlers.Hitters
+		if parsed.spec.name == "p" {
+			handler = handlers.Pitchers
+		}
+		if handler == nil {
+			err = fmt.Errorf("player: runtime is unavailable; reinstall skout")
+		} else {
+			output, err = handler(parsed.league, firstPositional(parsed.positionals), parsed.values["sort"], parsed.values["position"], parsed.booleans["waiver"], parsed.debug)
 		}
 	}
 	if err != nil {
@@ -334,9 +410,16 @@ func parse(args []string) (parsedInvocation, string) {
 		return parsedInvocation{}, missingPositional(spec, len(parsed.positionals))
 	}
 	if spec.name == "m" && parsed.values["week"] != "" {
-		if _, err := strconv.Atoi(parsed.values["week"]); err != nil {
+		week, err := strconv.Atoi(parsed.values["week"])
+		if err != nil {
 			return parsedInvocation{}, fmt.Sprintf("error: invalid value '%s' for '--week <WEEK>': invalid digit found in string\n\nFor more information, try '--help'.\n", parsed.values["week"])
 		}
+		if week <= 0 {
+			return parsedInvocation{}, fmt.Sprintf("error: invalid value '%s' for '--week <WEEK>': value must be positive\n\nFor more information, try '--help'.\n", parsed.values["week"])
+		}
+	}
+	if spec.name == "m" && parsed.values["day"] != "" && !validShortDay(parsed.values["day"]) {
+		return parsedInvocation{}, fmt.Sprintf("error: invalid value '%s' for '--day <MMM-DD>': expected a real date in MMM-DD form\n\nFor more information, try '--help'.\n", parsed.values["day"])
 	}
 	if spec.maximum >= 0 && len(parsed.positionals) > spec.maximum {
 		return parsedInvocation{}, extraPositional(spec, parsed.positionals[spec.maximum])
@@ -356,6 +439,22 @@ func parse(args []string) (parsedInvocation, string) {
 		}
 	}
 	return parsed, ""
+}
+
+func firstPositional(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
+func validShortDay(value string) bool {
+	if len(value) != 6 || value[3] != '-' {
+		return false
+	}
+	month := strings.ToUpper(value[:1]) + strings.ToLower(value[1:3])
+	_, err := time.Parse("Jan-02-2006", month+value[3:]+"-2000")
+	return err == nil
 }
 
 func parseRootOnly(args []string) (parsedInvocation, string, bool) {

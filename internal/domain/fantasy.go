@@ -98,6 +98,109 @@ type FantasyPlayer struct {
 	YahooRank         *int64     `json:"yahoo_rank"`
 }
 
+// GameIndicatorKind identifies one semantic lineup marker.
+type GameIndicatorKind uint8
+
+const (
+	GameIndicatorNone GameIndicatorKind = iota
+	GameIndicatorBattingOrder
+	GameIndicatorStartingPitcher
+	GameIndicatorOutOfLineup
+)
+
+// GameIndicator carries a lineup marker and an optional batting-order value.
+type GameIndicator struct {
+	Kind  GameIndicatorKind `json:"kind"`
+	Order int               `json:"order,omitempty"`
+}
+
+// StoredFantasyPlayer combines durable Yahoo ownership with role-distinct MLB enrichment.
+type StoredFantasyPlayer struct {
+	YahooPlayerID       *int64        `json:"yahoo_player_id,omitempty"`
+	MLBAMID             *int64        `json:"mlbam_id,omitempty"`
+	Name                string        `json:"name"`
+	Team                string        `json:"team"`
+	Role                string        `json:"role"`
+	Positions           string        `json:"positions"`
+	IsCloser            bool          `json:"is_closer"`
+	Status              string        `json:"status"`
+	InjuryNote          string        `json:"injury_note"`
+	BirthDate           string        `json:"birth_date"`
+	GameStatus          string        `json:"game_status"`
+	GameIndicator       GameIndicator `json:"game_indicator"`
+	Hand                string        `json:"hand"`
+	Rank                *int64        `json:"rank,omitempty"`
+	PercentOwned        *float64      `json:"percent_owned,omitempty"`
+	PercentageStarted   float64       `json:"percentage_started"`
+	ExpertConsensusRank *int64        `json:"expert_consensus_rank,omitempty"`
+	Owner               *string       `json:"owner,omitempty"`
+	Slot                *string       `json:"slot,omitempty"`
+	Batting             [7]float64    `json:"batting"`
+	Pitching            [7]float64    `json:"pitching"`
+	HittingAdvanced     [8]*float64   `json:"hitting_advanced"`
+	PitchingAdvanced    [6]*float64   `json:"pitching_advanced"`
+	FanGraphsBattedBall [2]*float64   `json:"fangraphs_batted_ball"`
+	PQSCounting         [6]float64    `json:"pqs_counting"`
+	StatcastSamples     [4]float64    `json:"statcast_samples"`
+	PQSPriorCounting    [6]float64    `json:"pqs_prior_counting"`
+	LeagueGamesPlayed   int64         `json:"league_games_played"`
+}
+
+// PlayerGameLog is one rendered game-log line retained for offline player detail.
+type PlayerGameLog struct {
+	Date         string `json:"date"`
+	GameID       int64  `json:"game_id,omitempty"`
+	Opponent     string `json:"opponent"`
+	Status       string `json:"status,omitempty"`
+	BattingOrder int    `json:"batting_order,omitempty"`
+	Line         string `json:"line"`
+}
+
+// HitterAverage is a completed-season batting line normalized to 162 games.
+type HitterAverage struct {
+	PlateAppearances   int64   `json:"plate_appearances"`
+	OnBasePercentage   float64 `json:"on_base_percentage"`
+	OnBasePlusSlugging float64 `json:"on_base_plus_slugging"`
+	Runs               int64   `json:"runs"`
+	HomeRuns           int64   `json:"home_runs"`
+	RunsBattedIn       int64   `json:"runs_batted_in"`
+	StolenBases        int64   `json:"stolen_bases"`
+	BattingAverage     float64 `json:"batting_average"`
+}
+
+// WaiverCandidate is one active MLB player with season opportunity evidence.
+type WaiverCandidate struct {
+	MLBAMID          int64
+	Role             string
+	Positions        string
+	PlateAppearances float64
+	InningsPitched   float64
+	Games            int64
+	GamesStarted     int64
+}
+
+// MatchupOdds contains optional selected-team moneyline context.
+type MatchupOdds struct {
+	Mine bool   `json:"mine"`
+	Line string `json:"line"`
+}
+
+// MatchupView is the complete deterministic input for a two-sided matchup.
+type MatchupView struct {
+	Matchup  Matchup
+	Mine     RosterWeekStats
+	Opponent RosterWeekStats
+	Teams    []FantasyTeam
+	Stale    bool
+	Odds     []MatchupOdds
+}
+
+// LocalMatchupView is the explicitly limited fallback when Yahoo is unavailable.
+type LocalMatchupView struct {
+	TeamName string
+	Players  []StoredFantasyPlayer
+}
+
 // FantasyRosterSlot associates one player with one team's assigned slot.
 type FantasyRosterSlot struct {
 	TeamKey       string   `json:"team_key"`
@@ -136,25 +239,26 @@ func (team MatchupTeam) TotalGames() int {
 
 // PlayerWeekStats is one player's weekly statistics and roster state.
 type PlayerWeekStats struct {
-	YahooPlayerID     int64      `json:"yahoo_player_id"`
-	Name              string     `json:"name"`
-	Team              string     `json:"team"`
-	PositionType      string     `json:"position_type"`
-	SlotPosition      Position   `json:"slot_position"`
-	EligiblePositions []Position `json:"eligible_positions"`
-	InjuryStatus      string     `json:"injury_status"`
-	HAB               string     `json:"hab"`
-	Runs              int        `json:"runs"`
-	HomeRuns          int        `json:"home_runs"`
-	RunsBattedIn      int        `json:"runs_batted_in"`
-	StolenBases       int        `json:"stolen_bases"`
-	BattingAverage    string     `json:"batting_average"`
-	InningsPitched    string     `json:"innings_pitched"`
-	Wins              int        `json:"wins"`
-	Saves             int        `json:"saves"`
-	Strikeouts        int        `json:"strikeouts"`
-	EarnedRunAverage  string     `json:"earned_run_average"`
-	WHIP              string     `json:"whip"`
+	YahooPlayerID     int64         `json:"yahoo_player_id"`
+	Name              string        `json:"name"`
+	Team              string        `json:"team"`
+	PositionType      string        `json:"position_type"`
+	SlotPosition      Position      `json:"slot_position"`
+	EligiblePositions []Position    `json:"eligible_positions"`
+	InjuryStatus      string        `json:"injury_status"`
+	GameIndicator     GameIndicator `json:"game_indicator"`
+	HAB               string        `json:"hab"`
+	Runs              int           `json:"runs"`
+	HomeRuns          int           `json:"home_runs"`
+	RunsBattedIn      int           `json:"runs_batted_in"`
+	StolenBases       int           `json:"stolen_bases"`
+	BattingAverage    string        `json:"batting_average"`
+	InningsPitched    string        `json:"innings_pitched"`
+	Wins              int           `json:"wins"`
+	Saves             int           `json:"saves"`
+	Strikeouts        int           `json:"strikeouts"`
+	EarnedRunAverage  string        `json:"earned_run_average"`
+	WHIP              string        `json:"whip"`
 }
 
 // RosterWeekStats contains one team's weekly player boxscore.

@@ -3,6 +3,7 @@ package providers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -33,6 +34,92 @@ func fixtureResponse(t *testing.T, path string) transport.Response {
 		t.Fatal(err)
 	}
 	return transport.Response{Status: 200, Body: data}
+}
+
+func TestMLBFantasyViewsUseBoundedExactRangeLogAndBoxscoreRequests(t *testing.T) {
+	tests := []struct {
+		name, fixture, path, query string
+		run                        func(*MLBClient) error
+	}{
+		{name: "HittingRange", fixture: "testdata/mlb/bulk-hitting.json", path: "/api/v1/stats", query: "group=hitting", run: func(client *MLBClient) error {
+			rows, err := client.FetchHittingStatsByDateRange(2026, "2026-04-01", "2026-04-01")
+			if err == nil && len(rows) == 0 {
+				return errors.New("empty hitting range")
+			}
+			return err
+		}},
+		{name: "PitchingRange", fixture: "testdata/mlb/bulk-pitching.json", path: "/api/v1/stats", query: "group=pitching", run: func(client *MLBClient) error {
+			rows, err := client.FetchPitchingStatsByDateRange(2026, "2026-04-01", "2026-04-02")
+			if err == nil && len(rows) == 0 {
+				return errors.New("empty pitching range")
+			}
+			return err
+		}},
+		{name: "HitterLog", fixture: "testdata/mlb/hitter-game-log.json", path: "/api/v1/people/700001/stats", query: "group=hitting", run: func(client *MLBClient) error {
+			rows, err := client.FetchHitterGameLog(700001, 2026)
+			if err == nil && (len(rows) != 1 || rows[0].GameID != 800010) {
+				return fmt.Errorf("hitter rows=%#v", rows)
+			}
+			return err
+		}},
+		{name: "PitcherLog", fixture: "testdata/mlb/pitcher-game-log.json", path: "/api/v1/people/600002/stats", query: "group=pitching", run: func(client *MLBClient) error {
+			rows, err := client.FetchPitcherGameLog(600002, 2026)
+			if err == nil && len(rows) != 2 {
+				return fmt.Errorf("pitcher rows=%#v", rows)
+			}
+			return err
+		}},
+		{name: "Boxscore", fixture: "testdata/mlb/boxscore.json", path: "/api/v1/game/800010/boxscore", run: func(client *MLBClient) error {
+			boxscore, err := client.FetchBoxscore(800010)
+			if err == nil && (len(boxscore.Away.BattingOrder) != 1 || boxscore.Away.Players[700001].Batting == nil || boxscore.Home.Players[600002].Pitching == nil) {
+				return fmt.Errorf("boxscore=%#v", boxscore)
+			}
+			return err
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := NewProductionMLBClient(transport.New(providerExecutor{execute: func(request transport.ValidatedRequest) (transport.Response, error) {
+				target, err := url.Parse(request.URL())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if target.Path != test.path || test.query != "" && !strings.Contains(target.RawQuery, test.query) {
+					t.Fatalf("request=%s", request.URL())
+				}
+				if strings.Contains(test.name, "Range") && (!strings.Contains(target.RawQuery, "stats=byDateRange") || !strings.Contains(target.RawQuery, "gameType=R") || !strings.Contains(target.RawQuery, "limit=2000") || !strings.Contains(target.RawQuery, "startDate=2026-04-01")) {
+					t.Fatalf("range query=%s", target.RawQuery)
+				}
+				return fixtureResponse(t, test.fixture), nil
+			}}))
+			if err := test.run(client); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	client := NewProductionMLBClient(transport.New(providerExecutor{execute: func(transport.ValidatedRequest) (transport.Response, error) {
+		return transport.Response{Status: 200, Body: []byte(`{}`)}, nil
+	}}))
+	if _, err := client.FetchHittingStatsByDateRange(2026, "2026-04-02", "2026-04-01"); err == nil {
+		t.Fatal("reversed range accepted")
+	}
+	if _, err := client.FetchBoxscore(1); err == nil || !strings.Contains(err.Error(), "teams envelope") {
+		t.Fatalf("incomplete boxscore error=%v", err)
+	}
+	malformed := func(payload string) *MLBClient {
+		return NewProductionMLBClient(transport.New(providerExecutor{execute: func(transport.ValidatedRequest) (transport.Response, error) {
+			return transport.Response{Status: 200, Body: []byte(payload)}, nil
+		}}))
+	}
+	if _, err := malformed(`{"stats":[{"splits":[{"player":{}}]}]}`).FetchHittingStatsByDateRange(2026, "2026-04-01", "2026-04-01"); err == nil || !strings.Contains(err.Error(), "player identity") {
+		t.Fatalf("incomplete hitting split error=%v", err)
+	}
+	if _, err := malformed(`{}`).FetchHitterGameLog(1, 2026); err == nil || !strings.Contains(err.Error(), "stats envelope") {
+		t.Fatalf("incomplete hitter log error=%v", err)
+	}
+	if _, err := malformed(`{"teams":{"away":{},"home":{}}}`).FetchBoxscore(1); err == nil || !strings.Contains(err.Error(), "player maps") {
+		t.Fatalf("incomplete boxscore teams error=%v", err)
+	}
 }
 
 func TestMLBFixturesDecodeThroughExactBoundedEndpoints(t *testing.T) {
@@ -310,7 +397,7 @@ func TestMLBPitcherGameLogUsesExactBoundedRequestAndNormalizesRows(t *testing.T)
 		return transport.Response{Status: 200, Body: []byte(`{}`)}, nil
 	}}), ProductionMLBEndpoints())
 	empty, err := emptyClient.FetchPitcherGameLog(600001, 2026)
-	if err != nil || len(empty) != 0 {
+	if err == nil || len(empty) != 0 || !strings.Contains(err.Error(), "stats envelope") {
 		t.Fatalf("empty=%#v err=%v", empty, err)
 	}
 }
@@ -354,14 +441,14 @@ func (executor *qualityStartExecutor) Execute(request transport.ValidatedRequest
 		panic("simulated worker failure")
 	}
 	return transport.Response{Status: 200, Body: []byte(`{"stats":[{"splits":[
-{"date":"2026-03-31","stat":{"gamesStarted":1,"inningsPitched":"6.0","earnedRuns":3}},
-{"date":"2026-04-01","stat":{"gamesStarted":1,"inningsPitched":"6.0","earnedRuns":3}},
-{"date":"2026-04-02","stat":{"gamesStarted":1,"inningsPitched":"5.2","earnedRuns":0}},
-{"date":"2026-04-03","stat":{"gamesStarted":0,"inningsPitched":"9.0","earnedRuns":0}},
-{"date":"2026-04-04","stat":{"gamesStarted":1,"inningsPitched":"6.0","earnedRuns":4}},
-{"date":"2026-04-05","stat":{"gamesStarted":1,"inningsPitched":"6.3","earnedRuns":0}},
-{"date":"2026-05-31","stat":{"gamesStarted":1,"inningsPitched":"6.1","earnedRuns":3}},
-{"date":"2026-06-01","stat":{"gamesStarted":1,"inningsPitched":"7.0","earnedRuns":1}}
+{"date":"2026-03-31","game":{"gamePk":1},"opponent":{"id":147},"stat":{"gamesStarted":1,"inningsPitched":"6.0","earnedRuns":3}},
+{"date":"2026-04-01","game":{"gamePk":2},"opponent":{"id":147},"stat":{"gamesStarted":1,"inningsPitched":"6.0","earnedRuns":3}},
+{"date":"2026-04-02","game":{"gamePk":3},"opponent":{"id":147},"stat":{"gamesStarted":1,"inningsPitched":"5.2","earnedRuns":0}},
+{"date":"2026-04-03","game":{"gamePk":4},"opponent":{"id":147},"stat":{"gamesStarted":0,"inningsPitched":"9.0","earnedRuns":0}},
+{"date":"2026-04-04","game":{"gamePk":5},"opponent":{"id":147},"stat":{"gamesStarted":1,"inningsPitched":"6.0","earnedRuns":4}},
+{"date":"2026-04-05","game":{"gamePk":6},"opponent":{"id":147},"stat":{"gamesStarted":1,"inningsPitched":"6.3","earnedRuns":0}},
+{"date":"2026-05-31","game":{"gamePk":7},"opponent":{"id":147},"stat":{"gamesStarted":1,"inningsPitched":"6.1","earnedRuns":3}},
+{"date":"2026-06-01","game":{"gamePk":8},"opponent":{"id":147},"stat":{"gamesStarted":1,"inningsPitched":"7.0","earnedRuns":1}}
 ]}]}`)}, nil
 }
 

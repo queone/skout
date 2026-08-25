@@ -702,9 +702,9 @@ func ParseRosterWeekStats(teamKey string, week int, payload []byte) (domain.Rost
 		}
 		hab := yahooText(values, "H/AB")
 		if _, hits := stats["8"]; hits {
-			hab = fmt.Sprintf("%s-%s", yahooStat(stats, values, "8", "H"), yahooStat(stats, values, "6", "AB"))
+			hab = fmt.Sprintf("%s/%s", yahooStat(stats, values, "8", "H"), yahooStat(stats, values, "6", "AB"))
 		} else if _, atBats := stats["6"]; atBats {
-			hab = fmt.Sprintf("%s-%s", yahooStat(stats, values, "8", "H"), yahooStat(stats, values, "6", "AB"))
+			hab = fmt.Sprintf("%s/%s", yahooStat(stats, values, "8", "H"), yahooStat(stats, values, "6", "AB"))
 		}
 		players = append(players, domain.PlayerWeekStats{YahooPlayerID: id, Name: yahooText(values, "full"), Team: yahooText(values, "editorial_team_abbr"), PositionType: role, SlotPosition: domain.ParsePosition(yahooText(values, "position")), InjuryStatus: yahooText(values, "status"), HAB: hab, Runs: yahooStatInt(stats, values, "7", "R"), HomeRuns: yahooStatInt(stats, values, "12", "HR"), RunsBattedIn: yahooStatInt(stats, values, "13", "RBI"), StolenBases: yahooStatInt(stats, values, "16", "SB"), BattingAverage: yahooStat(stats, values, "3", "AVG"), InningsPitched: yahooStat(stats, values, "50", "IP"), Wins: yahooStatInt(stats, values, "28", "W"), Saves: yahooStatInt(stats, values, "32", "SV"), Strikeouts: yahooStatInt(stats, values, "42", "K"), EarnedRunAverage: yahooStat(stats, values, "26", "ERA"), WHIP: yahooStat(stats, values, "27", "WHIP")})
 	}

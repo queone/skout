@@ -1,0 +1,2 @@
+HITTER                      POS    STATUS    B    YR   ECR   xwOBA     EV   BRL%    HH%     K%    BB%    SPD     PA    OBP    OPS    R   HR   RBI    SB    AVG  OWNER
+Ada Hitter NYY              OF     NoGame    R     5     —    .360      —      —      —      —      —      —    100   .350      —   20    5    18     3   .280  Operators

@@ -8,12 +8,13 @@ Skout is a terminal-oriented, read-only fantasy baseball advisor. It combines a 
 
 `cmd/skout` injects process streams, terminal evidence, environment values, and the binary version into `internal/cli`. The descriptor grammar renders help, parses global and command flags, and dispatches application handlers.
 
-The executable application surface has four paths:
+The executable application surface has five paths:
 
 1. `sync` resolves a public Yahoo league and primary team, acquires complete provider snapshots in a fixed foreground order, and records isolated freshness and run outcomes.
 2. `st` reads configuration and SQLite status through non-mutating inspection APIs; an explicit `-l` selection updates configuration without opening the database for writes.
 3. `t`, `tt`, and `sp` coordinate public provider adapters, versioned command snapshots, typed store writes, optional local Yahoo context, stale fallback, and deterministic terminal renderers.
 4. `fetch` validates an allowlisted provider alias and origin-relative path before using the bounded transport.
+5. `m`, `r`, `rt`, `h`, and `p` combine durable fantasy reads with command-time public Yahoo, MLB schedule, game-log, boxscore, lineup, and odds acquisition; isolated versioned snapshots preserve the last complete view.
 
 ## Public Synchronization
 
@@ -30,19 +31,20 @@ Foreground synchronization uses this ordered provider pipeline:
 
 Each provider item records attempts, successful freshness, degraded detail, or bounded failure detail. A failed item retains prior successful data. The overall run succeeds in degraded form when at least one provider succeeds and fails with recovery guidance only when every provider fails. A private cross-process lock prevents concurrent foreground synchronization.
 
-Yahoo access uses public endpoints only. The runtime sends no authorization header, OAuth material, cookies, browser state, or credentials, and it performs no roster mutation. Daily Yahoo roster acquisition and short-lived RotoWire lineup acquisition exist as dormant command-time foundations and are not called by foreground synchronization.
+Yahoo access uses public endpoints only. The runtime sends no authorization header, OAuth material, cookies, browser state, or credentials, and it performs no roster mutation. Daily Yahoo roster acquisition and short-lived RotoWire lineup acquisition run only for the matching read-only command and are not added to foreground synchronization.
 
 ## Components
 
 - `cmd/skout`: process entrypoint, version declaration, and production dependency wiring.
 - `internal/cli`: descriptor grammar, help, streams, diagnostics, and command dispatch.
-- `internal/app`: synchronization, origin-pinned fetch, local status, and MLB command orchestration.
+- `internal/app`: synchronization, origin-pinned fetch, local status, MLB commands, fantasy-player views, and matchup orchestration.
+- `internal/analysis`: deterministic pitcher-role, projection-window, percentile, and waiver-eligibility helpers.
 - `internal/domain`: provider-neutral fantasy, roster, standings, totals, and slate records.
 - `internal/providers`: bounded public Yahoo, MLB StatsAPI, Baseball Savant, FanGraphs, FantasyPros, RotoWire, ESPN, and OddsShark adapters.
 - `internal/transport`: validated HTTPS or loopback-test requests, one deadline across redirects and body reads, manual redirect policy, response limits, and deterministic lowercase headers.
 - `internal/cache`: `skout-cache-v1` raw payload storage with SHA-256 names, a 32 MiB limit, private atomic writes, symlink rejection, and deterministic pruning.
 - `internal/store`: schema-version-6 creation and migration, one dedicated SQLite connection, complete fantasy and enrichment replacement, snapshots, freshness, sync runs, and read-only status inspection.
-- `internal/display`: deterministic roster, totals, probable-pitcher, glossary, help, and status presentation with ANSI-safe semantic styling.
+- `internal/display`: deterministic fantasy matchup, roster, totals, pool, detail-card, MLB, glossary, help, and status presentation with ANSI-safe semantic styling.
 - `internal/config`: private JSON configuration with atomic replacement and compatible deprecated-field reads.
 - `internal/terminal`: injected color selection and semantic roles.
 - `build.sh`: canonical Go validation, installation, preparation, and release entrypoint.
@@ -51,11 +53,13 @@ Yahoo access uses public endpoints only. The runtime sends no authorization head
 
 The runtime uses `$HOME/.config/skout/config.json`, `$HOME/.config/skout/skout.db`, and the platform cache root under `skout/api-cache`. Configuration and cache replacement are private and atomic. SQLite uses schema version 6, one dedicated connection, WAL mode, a five-second busy timeout, and immediate transactions for complete replacements.
 
-League settings, categories, roster positions, fantasy teams, players, roster slots, and free agents replace as one league-scoped transaction. MLB seasons, individual 40-man rosters, Savant groups, the FanGraphs snapshot, and FantasyPros ranks use bounded complete replacements that preserve unrelated scopes. Weekly Yahoo matchup payloads and ESPN odds use versioned command snapshots.
+League settings, categories, roster positions, fantasy teams, players, roster slots, and free agents replace as one league-scoped transaction. MLB seasons, individual 40-man rosters, Savant groups, the FanGraphs snapshot, and FantasyPros ranks use bounded complete replacements that preserve unrelated scopes. Yahoo matchup and roster payloads, player game logs, optional detail-card schedules and boxscores, and ESPN odds use source-, scope-, and version-isolated command snapshots.
+
+Fantasy roster and pool reads join role-distinct MLB identities to current and prior season statistics, Statcast, projections, closer roles, ECR, ownership, roster slots, and active-roster injury state. Command-time analysis is deterministic and does not persist recommendations. Daily matchup overlays fetch hitting and pitching concurrently, require reconciled identities for the entire displayed roster, and replace the daily values only after both acquisitions succeed.
 
 ## Boundaries
 
-Credentials, Yahoo roster mutation, background scheduling, and long-running services remain outside the runtime boundary. Fantasy matchup, roster, roster-total, and player-pool presentation are not part of the current executable surface. Final parity review and reference-repository archival remain separate repository decisions and do not participate in production behavior.
+Credentials, Yahoo roster mutation, background scheduling, and long-running services remain outside the runtime boundary. The Rust reference repository is already archived. Only the final cross-repository parity review remains outside this repository's executable migration work.
 
 The application remains on SQLite schema version 6 and introduces no schema version 7 behavior.
 

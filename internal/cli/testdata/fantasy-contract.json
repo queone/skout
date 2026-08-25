@@ -1,0 +1,58 @@
+[
+  {
+    "name": "matchup-all-selectors",
+    "args": ["-d", "-l", "mlb.l.9", "m", "Toros", "-w", "4"],
+    "code": 0,
+    "stdout": "m:mlb.l.9:Toros:4:false::true\n",
+    "stderr": "skout debug: command=m league_source=override\n"
+  },
+  {
+    "name": "roster-saved-league",
+    "args": ["r", "Manager"],
+    "code": 0,
+    "stdout": "r::Manager:false\n",
+    "stderr": ""
+  },
+  {
+    "name": "matchup-weekly",
+    "args": ["m", "-W"],
+    "code": 0,
+    "stdout": "m:::0:true::false\n",
+    "stderr": ""
+  },
+  {
+    "name": "matchup-selected-day",
+    "args": ["m", "-D", "Aug-25"],
+    "code": 0,
+    "stdout": "m:::0:false:Aug-25:false\n",
+    "stderr": ""
+  },
+  {
+    "name": "weekly-totals-current",
+    "args": ["rt", "-w"],
+    "code": 0,
+    "stdout": "rt::true:false\n",
+    "stderr": ""
+  },
+  {
+    "name": "hitter-pool-flags",
+    "args": ["h", "50", "-s", "pa", "-p", "OF", "-w", "-lmlb.l.8"],
+    "code": 0,
+    "stdout": "h:mlb.l.8:50:pa:OF:true:false\n",
+    "stderr": ""
+  },
+  {
+    "name": "pitcher-pool-flags",
+    "args": ["p", "30", "-s", "era", "-p", "SP", "-w", "-d"],
+    "code": 0,
+    "stdout": "p::30:era:SP:true:true\n",
+    "stderr": "skout debug: command=p league_source=saved\n"
+  },
+  {
+    "name": "pitcher-handler-failure",
+    "args": ["p", "fail"],
+    "code": 1,
+    "stdout": "",
+    "stderr": "injected pitcher failure\n"
+  }
+]

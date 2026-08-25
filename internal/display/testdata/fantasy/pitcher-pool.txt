@@ -1,0 +1,2 @@
+PITCHER                     POS    STATUS    T    YR   ECR    FBV  WHIFF%    CH%    GB%     K%    BB%     IP    QS    W   SV     K    ERA   WHIP  OWNER
+Ace Pitcher BOS             SP     NoGame    L     8     —   96.5       —      —      —      —      —   60.0     6    5    0    70   3.20   1.10  Operators

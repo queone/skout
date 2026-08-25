@@ -4,8 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"strings"
 	"unicode"
+
+	"github.com/queone/skout/internal/domain"
 )
 
 // RosterWrite is one complete roster row awaiting replacement.
@@ -90,6 +93,61 @@ func (store *Store) OwnershipSyncedAt() (*int64, error) {
 		return nil, operationError("read ownership freshness", store.path, err)
 	}
 	return &value, nil
+}
+
+// HitterAverage derives one player's prior-five-completed-season 162-game line.
+func (store *Store) HitterAverage(mlbamID, currentSeason int64) (*domain.HitterAverage, error) {
+	const operation = "read hitter completed-season average"
+	if mlbamID <= 0 || currentSeason <= 0 {
+		return nil, fmt.Errorf("%s: positive MLBAM ID and season are required; correct the value and retry", operation)
+	}
+	var games, pa, runs, homeRuns, rbi, stolenBases, hits, atBats, walks, hbp, totalBases int64
+	err := store.conn.QueryRowContext(context.Background(), `SELECT COALESCE(SUM(g),0),COALESCE(SUM(pa),0),COALESCE(SUM(r),0),COALESCE(SUM(hr),0),COALESCE(SUM(rbi),0),COALESCE(SUM(sb),0),COALESCE(SUM(h),0),COALESCE(SUM(ab),0),COALESCE(SUM(bb),0),COALESCE(SUM(hbp),0),COALESCE(SUM(tb),0)
+FROM mlbam_season_stats WHERE stat_group='hitting' AND season>=? AND season<? AND player_id=(SELECT id FROM players WHERE mlbam_id=? AND position_type IN ('H','B') ORDER BY CASE WHEN mlbam_match_source='seed' THEN 0 ELSE 1 END,id LIMIT 1)`, currentSeason-5, currentSeason, mlbamID).Scan(&games, &pa, &runs, &homeRuns, &rbi, &stolenBases, &hits, &atBats, &walks, &hbp, &totalBases)
+	if err != nil {
+		return nil, operationError(operation, store.path, err)
+	}
+	if games == 0 || atBats == 0 {
+		return nil, nil
+	}
+	scale := func(value int64) int64 { return int64(math.Floor(float64(value)*162/float64(games) + .5)) }
+	average := float64(hits) / float64(atBats)
+	slugging := float64(totalBases) / float64(atBats)
+	denominator := atBats + walks + hbp
+	onBase := 0.0
+	if denominator > 0 {
+		onBase = float64(hits+walks+hbp) / float64(denominator)
+	}
+	return &domain.HitterAverage{
+		PlateAppearances: scale(pa), OnBasePercentage: onBase, OnBasePlusSlugging: onBase + slugging,
+		Runs: scale(runs), HomeRuns: scale(homeRuns), RunsBattedIn: scale(rbi),
+		StolenBases: scale(stolenBases), BattingAverage: average,
+	}, nil
+}
+
+// WaiverCandidates reads active-roster opportunity evidence by MLB role.
+func (store *Store) WaiverCandidates() ([]domain.WaiverCandidate, error) {
+	rows, err := store.conn.QueryContext(context.Background(), `SELECT r.mlbam_id,r.primary_type,COALESCE(MAX(p.eligible_positions),MAX(p.display_position),''),MAX(COALESCE(s.pa,0)),MAX(COALESCE(s.ip,0)),MAX(COALESCE(s.g,0)),MAX(COALESCE(s.gs,0))
+FROM mlb_team_active_rosters r
+LEFT JOIN players p ON p.mlbam_id=r.mlbam_id AND ((r.primary_type='H' AND p.position_type IN ('H','B')) OR (r.primary_type='P' AND p.position_type='P'))
+LEFT JOIN mlbam_season_stats s ON s.player_id=p.id AND s.season=(SELECT MAX(season) FROM mlbam_season_stats) AND s.stat_group=CASE r.primary_type WHEN 'P' THEN 'pitching' ELSE 'hitting' END
+WHERE r.status='A' GROUP BY r.mlbam_id,r.primary_type ORDER BY r.primary_type,r.mlbam_id`)
+	if err != nil {
+		return nil, operationError("read waiver candidates", store.path, err)
+	}
+	defer rows.Close()
+	var output []domain.WaiverCandidate
+	for rows.Next() {
+		var row domain.WaiverCandidate
+		if err := rows.Scan(&row.MLBAMID, &row.Role, &row.Positions, &row.PlateAppearances, &row.InningsPitched, &row.Games, &row.GamesStarted); err != nil {
+			return nil, operationError("read waiver candidates", store.path, err)
+		}
+		output = append(output, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, operationError("read waiver candidates", store.path, err)
+	}
+	return output, nil
 }
 
 // ReplaceMLBRoster replaces one team's complete validated roster atomically.

@@ -322,7 +322,12 @@ func TestProductDocumentationMatchesTheExecutablePublicSurface(t *testing.T) {
 			t.Fatalf("README lacks %q", evidence)
 		}
 	}
-	for _, command := range []string{"skout reset", "skout m ", "skout r ", "skout rt", "skout h ", "skout p "} {
+	for _, command := range []string{"skout m ", "skout r ", "skout rt", "skout h ", "skout p "} {
+		if !strings.Contains(readme, command) {
+			t.Fatalf("README lacks active command %q", command)
+		}
+	}
+	for _, command := range []string{"skout reset"} {
 		if strings.Contains(readme, command) {
 			t.Fatalf("README documents unavailable command %q", command)
 		}
@@ -344,7 +349,7 @@ func TestProductDocumentationMatchesTheExecutablePublicSurface(t *testing.T) {
 	}
 
 	architecture := read("arch.md")
-	for _, evidence := range []string{"public endpoints only", "schema version 6", "Credentials", "roster mutation", "background", "Fantasy matchup", "parity review", "archival"} {
+	for _, evidence := range []string{"public endpoints only", "schema version 6", "Credentials", "roster mutation", "background", "fantasy matchup", "parity review", "already archived"} {
 		if !strings.Contains(architecture, evidence) {
 			t.Fatalf("architecture lacks boundary evidence %q", evidence)
 		}

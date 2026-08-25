@@ -1,0 +1,13 @@
+HITTER                  POS    STATUS    B  AGE    YR
+Ada Hitter NYY          OF     —         R    —     5
+
+SOURCE    xwOBA     EV   BRL%    HH%     K%    BB%    SPD  OWNER
+SAVANT    .360      —      —      —      —      —      —  Operators
+
+SPLIT           PA     OBP    OPS     R    HR   RBI    SB    AVG
+AVG162G        600    .350   .800    90    25    80    10   .275
+CURRENT        100    .350      —    20     5    18     3   .280
+NEXT20PA
+GAME LOG data may be stale — refresh unavailable.
+GAME LOG   OPP      RESULT    BO  H/AB     R    HR   RBI    SB    AVG
+Aug 24     @BOS               4   2/4     1     1     2     0   .500

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -19,6 +20,26 @@ func TestFantasyEnumsNormalizationAndUnknownPreservation(t *testing.T) {
 		if got := ParsePosition(value); got.String() != value {
 			t.Errorf("ParsePosition(%q)=%q", value, got)
 		}
+	}
+}
+
+func TestRichFantasyRecordsRoundTripIndicatorsAndLogs(t *testing.T) {
+	yahoo, mlbam := int64(7), int64(70)
+	player := StoredFantasyPlayer{YahooPlayerID: &yahoo, MLBAMID: &mlbam, Name: "Ada Hitter", Role: "B", GameIndicator: GameIndicator{Kind: GameIndicatorBattingOrder, Order: 3}, Batting: [7]float64{100, .350, 20, 5, 18, 3, .280}}
+	payload, err := json.Marshal(player)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded StoredFantasyPlayer
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.GameIndicator.Kind != GameIndicatorBattingOrder || decoded.GameIndicator.Order != 3 || decoded.MLBAMID == nil || *decoded.MLBAMID != 70 {
+		t.Fatalf("decoded=%#v", decoded)
+	}
+	log := PlayerGameLog{Date: "2026-08-25", GameID: 9, Opponent: "@BOS", Line: "H 2 AB 4"}
+	if !IsValidISODate(log.Date) || log.GameID <= 0 {
+		t.Fatalf("log=%#v", log)
 	}
 }
 
