@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/queone/skout/internal/cache"
@@ -200,6 +201,27 @@ type BulkPitchingSplit struct {
 	Team     BulkTeam      `json:"team"`
 	Position BulkPosition  `json:"position"`
 	Stat     PitchingStats `json:"stat"`
+}
+
+// PitchingGameLogEntry is one pitcher's normalized season game-log entry.
+type PitchingGameLogEntry struct {
+	Date           string
+	GameID         int64
+	IsHome         bool
+	OpponentTeamID int64
+	Stat           PitchingStats
+}
+
+// QualityStartIssue describes one pitcher-specific acquisition failure.
+type QualityStartIssue struct {
+	PersonID int64
+	Detail   string
+}
+
+// QualityStartResult contains successful positive counts and bounded partial failures.
+type QualityStartResult struct {
+	Counts map[int64]int64
+	Issues []QualityStartIssue
 }
 
 // ScheduleCacheResult describes one raw-cache-backed schedule acquisition.
@@ -432,6 +454,142 @@ func (client *MLBClient) FetchBulkPitchingStats(season int64, gameType string) (
 	return (*response.Stats)[0].Splits, nil
 }
 
+// FetchPitcherGameLog fetches one pitcher's chronological season game log.
+func (client *MLBClient) FetchPitcherGameLog(personID, season int64) ([]PitchingGameLogEntry, error) {
+	if personID <= 0 {
+		return nil, invalid("validate MLB identifier", "person ID must be positive")
+	}
+	if err := validateSeason(season); err != nil {
+		return nil, err
+	}
+	var response struct {
+		Stats *[]struct {
+			Splits []struct {
+				Date string        `json:"date"`
+				Stat PitchingStats `json:"stat"`
+				Game struct {
+					GameID int64 `json:"gamePk"`
+				} `json:"game"`
+				IsHome   bool `json:"isHome"`
+				Opponent struct {
+					TeamID int64 `json:"id"`
+				} `json:"opponent"`
+			} `json:"splits"`
+		} `json:"stats"`
+	}
+	if err := client.getJSON("fetch MLB pitcher game log", []string{"people", strconv.FormatInt(personID, 10), "stats"}, url.Values{
+		"stats":  {"gameLog"},
+		"season": {strconv.FormatInt(season, 10)},
+		"group":  {"pitching"},
+	}, &response); err != nil {
+		return nil, err
+	}
+	if response.Stats == nil || len(*response.Stats) == 0 {
+		return []PitchingGameLogEntry{}, nil
+	}
+	rows := (*response.Stats)[0].Splits
+	output := make([]PitchingGameLogEntry, 0, len(rows))
+	for _, row := range rows {
+		output = append(output, PitchingGameLogEntry{
+			Date:           row.Date,
+			GameID:         row.Game.GameID,
+			IsHome:         row.IsHome,
+			OpponentTeamID: row.Opponent.TeamID,
+			Stat:           row.Stat,
+		})
+	}
+	return output, nil
+}
+
+// FetchQualityStartsByDateRange derives positive quality-start counts for an inclusive date range.
+func (client *MLBClient) FetchQualityStartsByDateRange(season int64, startDate, endDate string, personIDs []int64) (QualityStartResult, error) {
+	if err := validateDateRange(season, startDate, endDate); err != nil {
+		return QualityStartResult{}, err
+	}
+	return client.aggregateQualityStarts(personIDs, func(personID int64) (int64, error) {
+		entries, err := client.FetchPitcherGameLog(personID, season)
+		if err != nil {
+			return 0, err
+		}
+		var count int64
+		for _, entry := range entries {
+			if entry.Date < startDate || entry.Date > endDate || entry.Stat.GamesStarted != 1 || entry.Stat.EarnedRuns > 3 {
+				continue
+			}
+			innings, valid := parseInningsPitched(entry.Stat.InningsPitched)
+			if valid && innings >= 6 {
+				count++
+			}
+		}
+		return count, nil
+	})
+}
+
+// FetchQualityStarts derives season totals from deduplicated pitcher game logs.
+func (client *MLBClient) FetchQualityStarts(season int64, personIDs []int64) (QualityStartResult, error) {
+	if err := validateSeason(season); err != nil {
+		return QualityStartResult{}, err
+	}
+	return client.FetchQualityStartsByDateRange(season, fmt.Sprintf("%04d-01-01", season), fmt.Sprintf("%04d-12-31", season), personIDs)
+}
+
+func (client *MLBClient) aggregateQualityStarts(personIDs []int64, fetch func(int64) (int64, error)) (QualityStartResult, error) {
+	seen := make(map[int64]struct{}, len(personIDs))
+	unique := make([]int64, 0, len(personIDs))
+	for _, personID := range personIDs {
+		if _, exists := seen[personID]; exists {
+			continue
+		}
+		seen[personID] = struct{}{}
+		unique = append(unique, personID)
+	}
+	for _, personID := range unique {
+		if personID <= 0 {
+			return QualityStartResult{}, invalid("validate MLB identifier", "person ID must be positive")
+		}
+	}
+	result := QualityStartResult{Counts: make(map[int64]int64)}
+	type outcome struct {
+		count    int64
+		err      error
+		panicked bool
+	}
+	for start := 0; start < len(unique); start += 5 {
+		end := start + 5
+		if end > len(unique) {
+			end = len(unique)
+		}
+		batch := unique[start:end]
+		outcomes := make([]outcome, len(batch))
+		var workers sync.WaitGroup
+		workers.Add(len(batch))
+		for index, personID := range batch {
+			go func() {
+				defer workers.Done()
+				defer func() {
+					if recover() != nil {
+						outcomes[index].panicked = true
+					}
+				}()
+				outcomes[index].count, outcomes[index].err = fetch(personID)
+			}()
+		}
+		workers.Wait()
+		for index, personID := range batch {
+			outcome := outcomes[index]
+			switch {
+			case outcome.panicked:
+				result.Issues = append(result.Issues, QualityStartIssue{PersonID: personID, Detail: "quality-start worker did not complete normally; retry the acquisition"})
+			case outcome.err != nil:
+				result.Issues = append(result.Issues, QualityStartIssue{PersonID: personID, Detail: bounded(outcome.err.Error(), 256)})
+			case outcome.count > 0:
+				result.Counts[personID] = outcome.count
+			}
+		}
+	}
+	return result, nil
+}
+
 func (client *MLBClient) bulk(operation string, season int64, gameType, group string, output any) error {
 	if err := validateSeason(season); err != nil {
 		return err
@@ -587,6 +745,40 @@ func validateDate(value string) error {
 		return invalid("validate MLB schedule date", "date must be a real MLB calendar date in YYYY-MM-DD form")
 	}
 	return nil
+}
+
+func validateDateRange(season int64, startDate, endDate string) error {
+	if err := validateSeason(season); err != nil {
+		return err
+	}
+	if err := validateDate(startDate); err != nil {
+		return err
+	}
+	if err := validateDate(endDate); err != nil {
+		return err
+	}
+	if startDate > endDate {
+		return invalid("validate MLB date range", "start date must not follow end date")
+	}
+	return nil
+}
+
+func parseInningsPitched(value string) (float64, bool) {
+	whole, outs, found := strings.Cut(value, ".")
+	if !found || whole == "" || outs != "0" && outs != "1" && outs != "2" {
+		return 0, false
+	}
+	for _, char := range whole {
+		if char < '0' || char > '9' {
+			return 0, false
+		}
+	}
+	innings, err := strconv.ParseUint(whole, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	extraOuts := uint64(outs[0] - '0')
+	return float64(innings) + float64(extraOuts)/3, true
 }
 
 func endpointLoopback(target *url.URL) bool {

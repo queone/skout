@@ -79,7 +79,7 @@ func TestRootHelpAndGlossaryPlainBehaviorRemainFrozen(t *testing.T) {
 	}
 	for _, args := range [][]string{nil, {"-h"}, {"-?"}, {"--help"}} {
 		var stdout, stderr bytes.Buffer
-		code := Run(args, "0.3.1", Context{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}, Handlers{})
+		code := Run(args, "0.4.0", Context{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}, Handlers{})
 		if code != 0 || !bytes.Equal(stdout.Bytes(), want) || stderr.Len() != 0 {
 			t.Errorf("root %v code=%d stdout differs=%v stderr=%q", args, code, !bytes.Equal(stdout.Bytes(), want), stderr.String())
 		}
@@ -111,6 +111,10 @@ func TestControlledNonFantasyContractDispatchesStreamsAndExitCodes(t *testing.T)
 	debugReachedHandler := false
 	handlers := Handlers{
 		Status: func(league string) (string, error) { return "status:" + league + "\n", nil },
+		Sync: func(league, team string, debug bool, output io.Writer) (string, error) {
+			_, _ = io.WriteString(output, "sync-progress\n")
+			return "sync:" + league + ":" + team + ":" + boolText(debug) + "\n", nil
+		},
 		Teams: func(team string, force, _ bool) (string, error) {
 			return "teams:" + team + ":" + boolText(force) + "\n", nil
 		},
@@ -131,6 +135,29 @@ func TestControlledNonFantasyContractDispatchesStreamsAndExitCodes(t *testing.T)
 	}
 	if !debugReachedHandler {
 		t.Fatal("debug state did not reach the application handler")
+	}
+}
+
+func TestSyncDispatchesFrozenFlagPlacementsAndStreamsProgress(t *testing.T) {
+	for _, args := range [][]string{
+		{"-l", "mlb.l.1", "sync", "-T", "Operators"},
+		{"sync", "--team=Operators", "--league=mlb.l.1"},
+		{"sync", "-T", "Operators", "-lmlb.l.1"},
+	} {
+		var stdout, stderr bytes.Buffer
+		called := false
+		handlers := Handlers{Sync: func(league, team string, debug bool, output io.Writer) (string, error) {
+			called = true
+			if league != "mlb.l.1" || team != "Operators" || debug {
+				t.Fatalf("args=%v league=%q team=%q debug=%v", args, league, team, debug)
+			}
+			_, _ = io.WriteString(output, "==> Sync started.\n")
+			return "==> Sync success.\n", nil
+		}}
+		code := Run(args, "0.4.0", Context{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr, Prompt: &stderr}, handlers)
+		if code != 0 || !called || stdout.String() != "==> Sync started.\n==> Sync success.\n" || stderr.Len() != 0 {
+			t.Errorf("args=%v code=%d called=%v stdout=%q stderr=%q", args, code, called, stdout.String(), stderr.String())
+		}
 	}
 }
 

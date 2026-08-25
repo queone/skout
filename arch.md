@@ -2,78 +2,72 @@
 
 ## Purpose
 
-Skout is a terminal-oriented fantasy baseball advisor. This repository is the Go successor to the frozen `queone/skout-rust` implementation.
+Skout is a terminal-oriented, read-only fantasy baseball advisor. It combines a configured public Yahoo league with MLB and analytical provider data while keeping all durable state local.
 
-## Current System
+## Runtime Paths
 
-`cmd/skout` injects process streams, terminal evidence, environment values, and the Go version into `internal/cli`. The shared descriptor grammar renders root and command help, parses global flags in frozen placements, dispatches implemented commands, and keeps the deferred fantasy command family fail-closed.
+`cmd/skout` injects process streams, terminal evidence, environment values, and the binary version into `internal/cli`. The descriptor grammar renders help, parses global and command flags, and dispatches application handlers.
 
-The implemented application surface has three paths:
+The executable application surface has four paths:
 
-1. `fetch` validates an allowlisted provider alias and origin-relative path before using the bounded transport.
-2. `st` reads configuration and SQLite status through non-mutating APIs and never opens a writable store.
-3. `t`, `tt`, and `sp` coordinate public provider adapters, versioned command snapshots, compatible typed store writes, optional local Yahoo context, and deterministic terminal renderers.
+1. `sync` resolves a public Yahoo league and primary team, acquires complete provider snapshots in a fixed foreground order, and records isolated freshness and run outcomes.
+2. `st` reads configuration and SQLite status through non-mutating inspection APIs; an explicit `-l` selection updates configuration without opening the database for writes.
+3. `t`, `tt`, and `sp` coordinate public provider adapters, versioned command snapshots, typed store writes, optional local Yahoo context, stale fallback, and deterministic terminal renderers.
+4. `fetch` validates an allowlisted provider alias and origin-relative path before using the bounded transport.
 
-## Implemented Components
+## Public Synchronization
 
-- `cmd/skout/main.go`: process entrypoint, version declaration, and production dependency wiring.
-- `internal/cli`: complete descriptor grammar, help, streams, diagnostics, dispatch, glossary integration, and deferred-command boundary.
-- `internal/app`: origin-pinned fetch, local-only status, and MLB command orchestration with freshness and stale fallback.
-- `internal/domain`: provider-neutral roster, standings, totals, and slate records.
-- `internal/providers`: bounded public MLB StatsAPI, ESPN, and OddsShark adapters.
+Foreground synchronization uses this ordered provider pipeline:
+
+1. Yahoo league settings, standings, rosters, free agents, and weekly matchup snapshots.
+2. Current MLB hitting and pitching, including bounded pitcher game-log quality starts.
+3. Five prior MLB hitting and pitching seasons with completeness manifests.
+4. Per-team MLB 40-man rosters with row-level freshness and failure isolation.
+5. Baseball Savant batting and pitching snapshots.
+6. FanGraphs projections, batted-ball data, and closer roles.
+7. FantasyPros Expert Consensus Rankings.
+8. ESPN current odds.
+
+Each provider item records attempts, successful freshness, degraded detail, or bounded failure detail. A failed item retains prior successful data. The overall run succeeds in degraded form when at least one provider succeeds and fails with recovery guidance only when every provider fails. A private cross-process lock prevents concurrent foreground synchronization.
+
+Yahoo access uses public endpoints only. The runtime sends no authorization header, OAuth material, cookies, browser state, or credentials, and it performs no roster mutation. Daily Yahoo roster acquisition and short-lived RotoWire lineup acquisition exist as dormant command-time foundations and are not called by foreground synchronization.
+
+## Components
+
+- `cmd/skout`: process entrypoint, version declaration, and production dependency wiring.
+- `internal/cli`: descriptor grammar, help, streams, diagnostics, and command dispatch.
+- `internal/app`: synchronization, origin-pinned fetch, local status, and MLB command orchestration.
+- `internal/domain`: provider-neutral fantasy, roster, standings, totals, and slate records.
+- `internal/providers`: bounded public Yahoo, MLB StatsAPI, Baseball Savant, FanGraphs, FantasyPros, RotoWire, ESPN, and OddsShark adapters.
 - `internal/transport`: validated HTTPS or loopback-test requests, one deadline across redirects and body reads, manual redirect policy, response limits, and deterministic lowercase headers.
-- `internal/cache`: Rust-compatible `skout-cache-v1` raw payload storage with SHA-256 names, a 32 MiB limit, atomic private writes, symlink rejection, and deterministic pruning.
-- `internal/store`: schema-version-6 creation and whole-chain migration, one dedicated SQLite connection, typed MLB persistence, command snapshots, sync runs, and read-only status inspection.
-- `internal/display`: deterministic MLB roster, totals, and probable-pitcher presentation with ANSI-safe semantic styling.
-- `internal/config`: compatible private JSON configuration with atomic replacement and deprecated-field read compatibility.
-- `cmd/skout/testdata/root-help.txt`: Go-owned golden help derived once from the frozen reference.
-- `cmd/skout/testdata/glossary-help.txt`: governed Go-owned glossary help shared by `i` and `whatis`.
-- `internal/glossary`: embedded glossary data, validation, lookup, suggestions, selection, and rendering.
-- `internal/terminal`: injected color selection and semantic roles used by help, glossary, status, and MLB output.
+- `internal/cache`: `skout-cache-v1` raw payload storage with SHA-256 names, a 32 MiB limit, private atomic writes, symlink rejection, and deterministic pruning.
+- `internal/store`: schema-version-6 creation and migration, one dedicated SQLite connection, complete fantasy and enrichment replacement, snapshots, freshness, sync runs, and read-only status inspection.
+- `internal/display`: deterministic roster, totals, probable-pitcher, glossary, help, and status presentation with ANSI-safe semantic styling.
+- `internal/config`: private JSON configuration with atomic replacement and compatible deprecated-field reads.
+- `internal/terminal`: injected color selection and semantic roles.
 - `build.sh`: canonical Go validation, installation, preparation, and release entrypoint.
 
-## Migration Boundary
+## Persistence
 
-The Rust repository is a migration-time behavioral reference only. Production code and permanent Go tests do not read it, execute it, or depend on its layout.
+The runtime uses `$HOME/.config/skout/config.json`, `$HOME/.config/skout/skout.db`, and the platform cache root under `skout/api-cache`. Configuration and cache replacement are private and atomic. SQLite uses schema version 6, one dedicated connection, WAL mode, a five-second busy timeout, and immediate transactions for complete replacements.
 
-Production and permanent tests do not read or execute the frozen repository. The copied scrubbed fixtures record `v0.36.3` at commit `13d8141eef8e1f36b295d651a91a1298e145f0d6` as their one-time provenance.
+League settings, categories, roster positions, fantasy teams, players, roster slots, and free agents replace as one league-scoped transaction. MLB seasons, individual 40-man rosters, Savant groups, the FanGraphs snapshot, and FantasyPros ranks use bounded complete replacements that preserve unrelated scopes. Weekly Yahoo matchup payloads and ESPN odds use versioned command snapshots.
 
-Execution remains deferred for destructive reset, authenticated Yahoo synchronization, matchup orchestration, fantasy roster totals, hitter and pitcher decision views, and their Savant, FanGraphs, FantasyPros, and RotoWire enrichment. Schema version 7, background work, credentials, and roster mutation remain outside the implemented boundary.
+## Boundaries
 
-## Persistence And Dependency Decisions
+Credentials, Yahoo roster mutation, background scheduling, and long-running services remain outside the runtime boundary. Fantasy matchup, roster, roster-total, and player-pool presentation are not part of the current executable surface. Final parity review and reference-repository archival remain separate repository decisions and do not participate in production behavior.
 
-The runtime reuses `$HOME/.config/skout/config.json`, `$HOME/.config/skout/skout.db`, and the platform cache root under `skout/api-cache`. `st -l` is intentionally render-only until Go synchronization can rebuild compatible saved state. Complete successful snapshots remain usable after provider failures and are marked stale when refreshed data cannot be acquired.
+The application remains on SQLite schema version 6 and introduces no schema version 7 behavior.
 
-`modernc.org/sqlite v1.56.0` is the sole new direct runtime capability. `modernc.org/libc v1.74.4` is pinned to the selected driver's matching runtime version. The build remains CGo-free.
+## Dependencies
 
-The resolved module graph contains `github.com/hashicorp/golang-lru/v2 v2.0.7` under MPL-2.0 through `modernc.org/libc`. This reviewed exception is absent from the production and project-test package closures because it belongs to upstream compiler, generator, and dependency-test machinery. Reevaluate the exception before vendoring dependencies or distributing a module cache.
+`modernc.org/sqlite v1.56.0` provides a CGo-free SQLite runtime, with `modernc.org/libc v1.74.4` pinned to the matching runtime version. Standard-library packages provide CLI, JSON, CSV, HTTP, caching, hashing, time, filesystem, and terminal orchestration.
 
-## Version Axes
-
-| Axis | Value |
-| --- | --- |
-| Frozen Rust repository release | `v0.36.3` |
-| Frozen Rust CLI | `0.22.1` |
-| Go binary and release | `0.3.1` |
-| SQLite schema target | `6` |
-| Govna executable | `v0.7.8` |
-| Govna canon | `v0.36.1` |
-
-The axes advance independently. Rust versions remain reference evidence; the Go binary and release line has its own history.
-
-## Intentional Differences
-
-- Accept `-?` for every subcommand help page.
-- Derive provider product user agents from the Go version.
-- Normalize response-header names to deterministic lowercase order.
-- Migrate every supported source schema to version 6 in one immediate transaction.
-- Keep `st -l` non-persisting until the Go Yahoo sync slice.
-
-Final parity review and Rust-reference archival remain separately authorized stages.
+The resolved module graph contains `github.com/hashicorp/golang-lru/v2 v2.0.7` under MPL-2.0 through `modernc.org/libc`. It is absent from production and project-test package closures because it belongs to upstream compiler, generator, and dependency-test machinery. Reevaluate it before vendoring dependencies or distributing a module cache.
 
 ## Governance Files
 
-- `AGENTS.md`: repository operating contract and migration invariants.
-- `plan.md`: migration stages and current delivery boundary.
+- `AGENTS.md`: repository operating contract.
+- `plan.md`: product direction and ideas.
 - `govna/development-cycle.md`: governed development lifecycle.
 - `govna/build-release.md`: build and release contract.

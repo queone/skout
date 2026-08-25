@@ -34,6 +34,7 @@ type Context struct {
 type Handlers struct {
 	Fetch     func(host, path string) (string, error)
 	Status    func(league string) (string, error)
+	Sync      func(league, team string, debug bool, output io.Writer) (string, error)
 	Teams     func(team string, force, debug bool) (string, error)
 	Totals    func(force, debug bool) (string, error)
 	Probables func(force, debug bool) (string, error)
@@ -56,7 +57,7 @@ var globalFlags = []flagSpec{{"-l", "--league", "KEY", "Yahoo league key", false
 var commands = []commandSpec{
 	{name: "fetch", label: "fetch <host> <path>", description: "Fetch a raw provider path for debugging", positional: "HOST PATH", minimum: 2, maximum: 2},
 	{name: "st", label: "st", description: "Show status"},
-	{name: "sync", label: "sync", description: "Synchronize the selected league", flags: []flagSpec{{"-T", "--team", "TEAM", "Select the primary fantasy team", false}}, deferred: true},
+	{name: "sync", label: "sync", description: "Synchronize the selected league", flags: []flagSpec{{"-T", "--team", "TEAM", "Select the primary fantasy team", false}}},
 	{name: "reset", label: "reset", description: "Delete the local skout database", deferred: true},
 	{name: "m", label: "m [team]", description: "Show a daily or weekly matchup", positional: "NAME", maximum: 1, flags: []flagSpec{{"-w", "--week", "WEEK", "Show a specific matchup week", false}, {"-W", "--weekly", "", "Show weekly running totals", false}, {"-D", "--day", "MMM-DD", "Show stats for a specific day", false}}, deferred: true},
 	{name: "t", label: "t [team]", description: "Show MLB 40-man rosters", positional: "TEAM", maximum: 1, flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
@@ -89,6 +90,13 @@ func ProductionHandlers(version string, context Context) Handlers {
 	return Handlers{
 		Fetch:  func(host, path string) (string, error) { return app.FetchProduction(version, host, path) },
 		Status: func(league string) (string, error) { return app.StatusProduction(league, mode) },
+		Sync: func(league, team string, debug bool, output io.Writer) (string, error) {
+			return app.SyncProduction(app.SyncOptions{
+				Version: version, League: league, Team: team, Debug: debug,
+				Input: context.Stdin, Prompt: context.Prompt, Output: output,
+				InputTerminal: context.StdinIsTerminal, PromptTerminal: context.StderrIsTerminal,
+			})
+		},
 		Teams: func(team string, force, debug bool) (string, error) {
 			return withMLB(debug, func(service *app.MLBService) (string, error) { return service.Teams(team, force) })
 		},
@@ -200,6 +208,12 @@ func Run(args []string, version string, context Context, handlers Handlers) int 
 			err = fmt.Errorf("status: runtime is unavailable; reinstall skout")
 		} else {
 			output, err = handlers.Status(parsed.league)
+		}
+	case "sync":
+		if handlers.Sync == nil {
+			err = fmt.Errorf("sync: runtime is unavailable; reinstall skout")
+		} else {
+			output, err = handlers.Sync(parsed.league, parsed.values["team"], parsed.debug, context.Stdout)
 		}
 	case "t":
 		team := ""

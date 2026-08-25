@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"strings"
 )
 
 // Status contains the read-only local fields rendered by skout st.
@@ -27,6 +28,55 @@ type Status struct {
 	FangraphsSync        *string
 	FantasyProsSync      *string
 	SavantBBEUnavailable bool
+}
+
+// RecordProviderSuccess records a complete or degraded successful live run.
+func (store *Store) RecordProviderSuccess(degraded bool) error {
+	const operation = "record provider success"
+	now, err := store.capturedUnix(operation)
+	if err != nil {
+		return err
+	}
+	status := "success"
+	if degraded {
+		status = "degraded"
+	}
+	return store.immediate(operation, func(ctx context.Context, executor sqlExecutor) error {
+		_, err := executor.ExecContext(ctx, `UPDATE dashboard_status SET
+provider_last_success_at=?,provider_freshness_at=?,provider_failure_count=0,
+circuit_open=0,last_error='',last_run_at=?,last_run_status=? WHERE id=1`, now, now, now, status)
+		if err != nil {
+			return operationError(operation, store.path, err)
+		}
+		return nil
+	})
+}
+
+// RecordProviderFailure records one bounded failed live run.
+func (store *Store) RecordProviderFailure(detail string) error {
+	const operation = "record provider failure"
+	now, err := store.capturedUnix(operation)
+	if err != nil {
+		return err
+	}
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		detail = "every provider failed; check network access and retry"
+	}
+	runes := []rune(detail)
+	if len(runes) > 512 {
+		detail = string(runes[:512])
+	}
+	return store.immediate(operation, func(ctx context.Context, executor sqlExecutor) error {
+		_, err := executor.ExecContext(ctx, `UPDATE dashboard_status SET
+provider_last_failure_at=?,provider_failure_count=MIN(provider_failure_count+1,5),
+circuit_open=CASE WHEN provider_failure_count+1>=5 THEN 1 ELSE 0 END,
+last_error=?,last_run_at=?,last_run_status='failed' WHERE id=1`, now, detail, now)
+		if err != nil {
+			return operationError(operation, store.path, err)
+		}
+		return nil
+	})
 }
 
 // InspectStatusAt inspects an existing database without creating or migrating it.

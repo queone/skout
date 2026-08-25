@@ -1,54 +1,106 @@
 # skout
 
-Skout is a command-line fantasy baseball advisor being migrated from Rust to Go. This public Go successor preserves the frozen Rust implementation as its behavioral reference while its functional commands move in tested slices.
+Read-only decision-support CLI for Yahoo Fantasy Baseball.
 
 ## Why
 
-Skout brings fantasy-league context, MLB data, player analysis, and concise terminal presentation into one utility. The migration moves active development to Go while retaining observable behavior and useful enhancements from the frozen implementation.
+Fantasy baseball managers make dozens of small decisions every day: which categories need attention, how an MLB club is performing, and which pitchers are likely to start. The useful data is spread across Yahoo, MLB, Baseball Savant, FanGraphs, FantasyPros, and game and odds providers. skout assembles that context locally and provides compact terminal views.
 
-## Implemented Commands
+## Overview
 
-- Run with no arguments, `-h`, `-?`, or `--help` to print root help, or use `-v` and `--version` for the Go binary version.
-- Run `i [term]` or `whatis [term]` to browse or search the embedded 113-entry glossary.
-- Run `fetch <host> <path>` to inspect a raw path pinned to one of the eight public provider origins named by `fetch`.
-- Run `st` to inspect compatible local state without network access, database creation, schema migration, or configuration mutation. Use `st -l <key>` for a one-render league override.
-- Run `t [team]` for one or all MLB 40-man rosters, `tt` for standings and team totals, and `sp` for the three-day probable-pitcher slate. Use `-f` to bypass command snapshot freshness.
+skout reads a configured public Yahoo league, enriches its players with MLB and analytical data, and saves complete local snapshots. Synchronization runs in the foreground, isolates provider failures, and retains the last usable data when an optional refresh fails.
 
-The shared grammar and command-specific help cover the complete frozen command surface. Valid `reset`, `sync`, `m`, `r`, `rt`, `h`, and `p` executions remain fail-closed with the migration diagnostic until later slices implement them.
+Yahoo access is unauthenticated and public-only. skout does not require a developer application, OAuth token, browser login, cookie, or credential, and it never changes a Yahoo roster.
 
-## Local State And Providers
+The current command views cover local status, MLB 40-man rosters, standings and team totals, probable pitchers, provider diagnostics, and an embedded baseball glossary. For architecture and design details, see [arch.md](arch.md).
 
-The Go runtime reuses the Rust configuration, raw-cache, and SQLite schema-version-6 formats in place. Configuration and cache replacements are private and atomic. SQLite uses one dedicated connection, WAL mode, a five-second busy timeout, and whole-chain transactions for migrations from schema versions 1 through 5.
+## Setup
 
-MLB StatsAPI supplies team, roster, standings, schedule, and season-stat data. ESPN and OddsShark add optional public odds context. Successful complete command payloads are retained as versioned snapshots; a failed refresh uses the last compatible payload with a stale warning when one exists. `fetch` also supports the frozen public aliases for RotoWire, Baseball Savant, Yahoo, FanGraphs, and FantasyPros. No scoped command requests credentials or uses authenticated Yahoo endpoints.
+Select your Yahoo league and fantasy team with one foreground sync:
 
-## Frozen Baseline
+```bash
+skout sync -l 170874 -T Toros
+```
 
-The behavioral reference is `queone/skout-rust` tag `v0.36.3` at commit `13d8141eef8e1f36b295d651a91a1298e145f0d6`.
+The league may be a numeric ID or a full Yahoo league key. The team may be a team key or name. In an interactive terminal, `skout sync` prompts when a required selection is missing and saves the result for later commands.
 
-| Axis | Frozen or current value |
-| --- | --- |
-| Frozen Rust repository release | `v0.36.3` |
-| Frozen Rust CLI version | `0.22.1` |
-| Go binary and release | `0.3.1` |
-| SQLite schema target | `6` |
-| Govna executable | `v0.7.8` |
-| Govna canon | `v0.36.1` |
+```bash
+skout st       # show local provider and snapshot status
+skout sync     # refresh the saved league and team
+```
 
-These values describe separate version axes. The Go runtime now preserves SQLite schema 6 without introducing schema 7.
+Yahoo's public fantasy endpoints are unofficial and may deny access or change without notice. skout does not attempt to bypass those restrictions; it retains complete prior data and reports recovery guidance.
 
-## Local Build
+## Usage
 
-Run `./build.sh` for formatting, tests, vetting, static analysis, compilation, and installation into the active Go workspace. The runtime uses CGo-free `modernc.org/sqlite v1.56.0` and its pinned `modernc.org/libc v1.74.4` runtime dependency; CLI, JSON, HTTP, caching, hashing, time, filesystem, and terminal orchestration use the Go standard library. The resolved module graph also contains `github.com/hashicorp/golang-lru/v2 v2.0.7` under MPL-2.0 as a reviewed graph-only exception; it is absent from production and project-test package closures and must be reevaluated before vendoring dependencies or distributing a module cache.
+```bash
+# Synchronization and local state
+skout sync                 # refresh the saved public league and team
+skout sync -l 170874       # select and refresh a public Yahoo league
+skout sync -T Toros        # select the primary fantasy team
+skout st                   # inspect local provider and snapshot status
+skout st -l 170874         # save a league selection and clear an incompatible team
 
-## Deferred Commands
+# MLB-wide views
+skout t                    # every MLB 40-man roster
+skout t pirates            # select by abbreviation, city, or nickname
+skout tt                   # MLB standings and team season totals
+skout sp                   # three-day probable-pitcher slate
+skout sp -f                # bypass the slate freshness gate
 
-Execution remains deferred for `reset`, Yahoo `sync`, matchup `m`, fantasy roster views `r` and `rt`, and player decision views `h` and `p`. Persistent `st -l` selection, saved-team clearing, authenticated Yahoo acquisition, Savant/FanGraphs/FantasyPros/RotoWire enrichment, and fantasy analysis remain later migration work.
+# Reference and diagnostics
+skout i                    # browse the embedded glossary
+skout i xwoba              # look up one term
+skout fetch <host> <path>  # inspect an allowlisted provider response
+skout --help               # show command help
+skout --version            # show the binary version
+```
 
-Intentional Go-owned differences in this slice are subcommand `-?` help, provider user agents derived from the Go version, deterministic lowercase response-header ordering, whole-chain atomic schema migration, and temporary non-persisting `st -l` behavior.
+Use `-d` or `--debug` to print operation diagnostics. Complete command snapshots remain usable with a stale warning when a provider refresh fails. Output uses semantic color in supported terminals and equivalent plain text when redirected, when `NO_COLOR` is set, or when `TERM=dumb`.
 
-Final parity review and archival of `skout-rust` remain separate Director decisions.
+## Example Use Case
+
+Start the day by refreshing your league and checking provider health:
+
+```bash
+skout sync
+skout st
+```
+
+Then review the MLB-wide context for lineup decisions:
+
+```bash
+skout tt
+skout sp
+skout t pirates
+```
+
+The totals view summarizes club performance, the probable-pitcher slate covers the next three days, and the roster view combines MLB usage with locally synchronized Yahoo ownership and quality-start context. skout remains advisory; make any roster move directly in Yahoo.
+
+## Data Sources
+
+| Source | Authentication | Used for |
+|--------|----------------|----------|
+| Yahoo Fantasy public endpoints | None | League settings, standings, rosters, free agents, ownership, ranks, and weekly matchup statistics |
+| [MLB StatsAPI](https://statsapi.mlb.com/api/v1) | None | Rosters, player identities, statistics, schedules, and pitcher game logs |
+| [Baseball Savant](https://baseballsavant.mlb.com) | None | Statcast hitting and pitching metrics |
+| [FanGraphs](https://www.fangraphs.com) | None | Projections, batted-ball data, and closer roles |
+| [FantasyPros](https://www.fantasypros.com) | None | Expert Consensus Rankings |
+| ESPN | None | Current game and odds context |
+| OddsShark | None | Optional future-game odds |
+
+ESPN and OddsShark are supplemental sources. OddsShark is unofficial and may degrade without failing the probable-pitcher slate.
+
+## Building from Source
+
+Requires Go 1.27 or newer.
+
+```bash
+./build.sh
+```
+
+`./build.sh` is the canonical repository validation and build command. It formats, tests, vets, analyzes, compiles, and installs `skout` into the active Go workspace.
 
 ## Governance
 
-See [`AGENTS.md`](AGENTS.md) for repository rules and [`govna/operator-contract-rationale.md`](govna/operator-contract-rationale.md) for their design rationale.
+See [AGENTS.md](AGENTS.md) for repository rules and [govna/operator-contract-rationale.md](govna/operator-contract-rationale.md) for their design rationale.

@@ -1,6 +1,7 @@
 [
   {"name":"version","args":["--version"],"code":0,"stdout":"skout 0.2.0\n","stderr":""},
   {"name":"status","args":["--league","mlb.l.1","st"],"code":0,"stdout":"status:mlb.l.1\n","stderr":""},
+  {"name":"sync","args":["-d","-l","mlb.l.1","sync","-T","Operators"],"code":0,"stdout":"sync-progress\nsync:mlb.l.1:Operators:true\n","stderr":"skout debug: command=sync league_source=override\n"},
   {"name":"teams","args":["t","NYY","--force"],"code":0,"stdout":"teams:NYY:true\n","stderr":""},
   {"name":"totals","args":["-d","tt"],"code":0,"stdout":"totals:false\n","stderr":"skout debug: command=tt league_source=saved\n"},
   {"name":"probables","args":["sp","-f"],"code":0,"stdout":"probables:true\n","stderr":""},

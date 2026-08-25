@@ -77,3 +77,27 @@ func TestConfigNewPathUsesPrivateModes(t *testing.T) {
 		}
 	}
 }
+
+func TestSyncAndStatusSelectionWritesRetainCompatiblePrivateJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config", "config.json")
+	for _, value := range []Config{
+		{CurrentLeague: "mlb.l.1", CurrentTeamKey: "mlb.l.1.t.2"},
+		{CurrentLeague: "mlb.l.2"},
+	} {
+		if err := WriteAt(path, value); err != nil {
+			t.Fatal(err)
+		}
+		read, err := ReadAt(path)
+		if err != nil || read != value {
+			t.Fatalf("read=%#v want=%#v err=%v", read, value, err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil || strings.Contains(string(data), "pull_public_league_id") {
+			t.Fatalf("data=%q err=%v", data, err)
+		}
+		info, err := os.Stat(path)
+		if err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("mode=%v err=%v", info.Mode().Perm(), err)
+		}
+	}
+}

@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.4.0 | AC7 deliver public fantasy synchronization |
 | 0.3.1 | AC6 adopt Govna v0.36.1 governance |
 | 0.3.0 | AC5 port non-fantasy runtime |
 | 0.2.0 | AC4 port glossary command |

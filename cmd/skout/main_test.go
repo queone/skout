@@ -14,7 +14,7 @@ func TestProductionVersionAndRootHelpWiring(t *testing.T) {
 	}{
 		{args: nil, fixture: "testdata/root-help.txt"},
 		{args: []string{"--help"}, fixture: "testdata/root-help.txt"},
-		{args: []string{"--version"}, want: "skout 0.3.1\n"},
+		{args: []string{"--version"}, want: "skout 0.4.0\n"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(test.args, &stdout, &stderr); code != 0 {
@@ -35,7 +35,7 @@ func TestProductionVersionAndRootHelpWiring(t *testing.T) {
 }
 
 func TestProductionDeferredWiringFailsClosed(t *testing.T) {
-	for _, command := range []string{"reset", "sync", "m", "r", "rt", "h", "p"} {
+	for _, command := range []string{"reset", "m", "r", "rt", "h", "p"} {
 		var stdout, stderr bytes.Buffer
 		if code := run([]string{command}, &stdout, &stderr); code != 2 {
 			t.Errorf("%s code=%d", command, code)
@@ -43,5 +43,9 @@ func TestProductionDeferredWiringFailsClosed(t *testing.T) {
 		if stdout.Len() != 0 || stderr.String() != "skout: command not implemented in this migration slice\n" {
 			t.Errorf("%s stdout=%q stderr=%q", command, stdout.String(), stderr.String())
 		}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"sync", "-l", "mlb.l.1", "-T", "Operators"}, &stdout, &stderr); code != 1 || stdout.Len() != 0 || stderr.String() != "sync: runtime is unavailable; reinstall skout\n" {
+		t.Fatalf("sync code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }

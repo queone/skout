@@ -7,7 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -277,5 +280,151 @@ func TestMLBProviderFailuresCarryOperationContext(t *testing.T) {
 				t.Fatalf("error=%v", err)
 			}
 		})
+	}
+}
+
+func TestMLBPitcherGameLogUsesExactBoundedRequestAndNormalizesRows(t *testing.T) {
+	var request transport.ValidatedRequest
+	client := NewMLBClient(transport.New(providerExecutor{execute: func(value transport.ValidatedRequest) (transport.Response, error) {
+		request = value
+		return transport.Response{Status: 200, Body: []byte(`{"stats":[{"splits":[{"date":"2026-04-01","game":{"gamePk":7},"isHome":true,"opponent":{"id":147},"stat":{"gamesStarted":1,"inningsPitched":"6.1","earnedRuns":2}}]}]}`)}, nil
+	}}), ProductionMLBEndpoints())
+	rows, err := client.FetchPitcherGameLog(600001, 2026)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []PitchingGameLogEntry{{Date: "2026-04-01", GameID: 7, IsHome: true, OpponentTeamID: 147, Stat: PitchingStats{GamesStarted: 1, InningsPitched: "6.1", EarnedRuns: 2}}}
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("rows=%#v", rows)
+	}
+	target, err := url.Parse(request.URL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantQuery := url.Values{"group": {"pitching"}, "season": {"2026"}, "stats": {"gameLog"}}
+	if request.Method() != transport.Get || target.Path != "/api/v1/people/600001/stats" || !reflect.DeepEqual(target.Query(), wantQuery) || request.Timeout() != mlbTimeout || request.BodyLimit() != mlbBodyLimit {
+		t.Fatalf("request=%s method=%s bounds=%v/%d", request.URL(), request.Method(), request.Timeout(), request.BodyLimit())
+	}
+
+	emptyClient := NewMLBClient(transport.New(providerExecutor{execute: func(transport.ValidatedRequest) (transport.Response, error) {
+		return transport.Response{Status: 200, Body: []byte(`{}`)}, nil
+	}}), ProductionMLBEndpoints())
+	empty, err := emptyClient.FetchPitcherGameLog(600001, 2026)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty=%#v err=%v", empty, err)
+	}
+}
+
+type qualityStartExecutor struct {
+	mu       sync.Mutex
+	requests []transport.ValidatedRequest
+	active   atomic.Int64
+	maximum  atomic.Int64
+}
+
+func (executor *qualityStartExecutor) Execute(request transport.ValidatedRequest) (response transport.Response, err error) {
+	target, err := url.Parse(request.URL())
+	if err != nil {
+		return transport.Response{}, err
+	}
+	segments := strings.Split(strings.Trim(target.Path, "/"), "/")
+	if len(segments) < 3 {
+		return transport.Response{Status: 404}, nil
+	}
+	personID, err := strconv.ParseInt(segments[len(segments)-2], 10, 64)
+	if err != nil {
+		return transport.Response{}, err
+	}
+	executor.mu.Lock()
+	executor.requests = append(executor.requests, request)
+	executor.mu.Unlock()
+	active := executor.active.Add(1)
+	defer executor.active.Add(-1)
+	for {
+		maximum := executor.maximum.Load()
+		if active <= maximum || executor.maximum.CompareAndSwap(maximum, active) {
+			break
+		}
+	}
+	time.Sleep(10 * time.Millisecond)
+	if personID == 3 {
+		return transport.Response{Status: 503}, nil
+	}
+	if personID == 6 {
+		panic("simulated worker failure")
+	}
+	return transport.Response{Status: 200, Body: []byte(`{"stats":[{"splits":[
+{"date":"2026-03-31","stat":{"gamesStarted":1,"inningsPitched":"6.0","earnedRuns":3}},
+{"date":"2026-04-01","stat":{"gamesStarted":1,"inningsPitched":"6.0","earnedRuns":3}},
+{"date":"2026-04-02","stat":{"gamesStarted":1,"inningsPitched":"5.2","earnedRuns":0}},
+{"date":"2026-04-03","stat":{"gamesStarted":0,"inningsPitched":"9.0","earnedRuns":0}},
+{"date":"2026-04-04","stat":{"gamesStarted":1,"inningsPitched":"6.0","earnedRuns":4}},
+{"date":"2026-04-05","stat":{"gamesStarted":1,"inningsPitched":"6.3","earnedRuns":0}},
+{"date":"2026-05-31","stat":{"gamesStarted":1,"inningsPitched":"6.1","earnedRuns":3}},
+{"date":"2026-06-01","stat":{"gamesStarted":1,"inningsPitched":"7.0","earnedRuns":1}}
+]}]}`)}, nil
+}
+
+func TestMLBQualityStartsAreInclusiveDeduplicatedBoundedAndPartial(t *testing.T) {
+	executor := &qualityStartExecutor{}
+	client := NewMLBClient(transport.New(executor), ProductionMLBEndpoints())
+	result, err := client.FetchQualityStartsByDateRange(2026, "2026-04-01", "2026-05-31", []int64{1, 2, 3, 4, 5, 6, 7, 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, personID := range []int64{1, 2, 4, 5, 7} {
+		if result.Counts[personID] != 2 {
+			t.Errorf("person %d count=%d", personID, result.Counts[personID])
+		}
+	}
+	if len(result.Counts) != 5 || len(result.Issues) != 2 || result.Issues[0].PersonID != 3 || result.Issues[1].PersonID != 6 {
+		t.Fatalf("result=%#v", result)
+	}
+	if !strings.Contains(result.Issues[0].Detail, "HTTP 503") || !strings.Contains(result.Issues[1].Detail, "did not complete normally") {
+		t.Fatalf("issues=%#v", result.Issues)
+	}
+	for _, issue := range result.Issues {
+		if len([]rune(issue.Detail)) > 256 {
+			t.Errorf("unbounded issue=%q", issue.Detail)
+		}
+	}
+	if executor.maximum.Load() > 5 {
+		t.Fatalf("maximum concurrency=%d", executor.maximum.Load())
+	}
+	executor.mu.Lock()
+	requestCount := len(executor.requests)
+	executor.mu.Unlock()
+	if requestCount != 7 {
+		t.Fatalf("requests=%d", requestCount)
+	}
+}
+
+func TestMLBQualityStartsValidateBeforeDispatchAndOmitZeroCounts(t *testing.T) {
+	requests := atomic.Int64{}
+	client := NewMLBClient(transport.New(providerExecutor{execute: func(transport.ValidatedRequest) (transport.Response, error) {
+		requests.Add(1)
+		return transport.Response{Status: 200, Body: []byte(`{"stats":[{"splits":[]}]}`)}, nil
+	}}), ProductionMLBEndpoints())
+	for _, run := range []func() error{
+		func() error { _, err := client.FetchQualityStarts(2026, []int64{1, 0}); return err },
+		func() error {
+			_, err := client.FetchQualityStartsByDateRange(2026, "2026-04-02", "2026-04-01", []int64{1})
+			return err
+		},
+		func() error {
+			_, err := client.FetchQualityStartsByDateRange(2026, "2026-02-30", "2026-03-01", []int64{1})
+			return err
+		},
+	} {
+		if err := run(); err == nil {
+			t.Fatal("invalid quality-start request accepted")
+		}
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("validation dispatched %d requests", requests.Load())
+	}
+	result, err := client.FetchQualityStarts(2026, []int64{1})
+	if err != nil || len(result.Counts) != 0 || len(result.Issues) != 0 || requests.Load() != 1 {
+		t.Fatalf("result=%#v requests=%d err=%v", result, requests.Load(), err)
 	}
 }

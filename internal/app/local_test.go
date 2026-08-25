@@ -11,7 +11,7 @@ import (
 	"github.com/queone/skout/internal/terminal"
 )
 
-func TestStatusIsLocalOnlyNonPersistingAndDoesNotCreateDatabase(t *testing.T) {
+func TestStatusPersistsExplicitLeagueClearsTeamAndDoesNotCreateDatabase(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "config.json")
 	databasePath := filepath.Join(root, "absent.db")
@@ -19,7 +19,6 @@ func TestStatusIsLocalOnlyNonPersistingAndDoesNotCreateDatabase(t *testing.T) {
 	if err := config.WriteAt(configPath, settings); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := os.ReadFile(configPath)
 	output, err := Status(LocalOptions{ConfigPath: configPath, DatabasePath: databasePath, Mode: terminal.Plain}, "temporary.league")
 	if err != nil {
 		t.Fatal(err)
@@ -27,16 +26,42 @@ func TestStatusIsLocalOnlyNonPersistingAndDoesNotCreateDatabase(t *testing.T) {
 	if !strings.Contains(output, "League: temporary.league") || !strings.Contains(output, "Database: "+databasePath+" (absent, schema unknown)") {
 		t.Fatalf("output=%s", output)
 	}
-	after, _ := os.ReadFile(configPath)
-	if string(before) != string(after) {
-		t.Error("status persisted override")
-	}
 	read, _ := config.ReadAt(configPath)
-	if read.CurrentTeamKey != settings.CurrentTeamKey || read.CurrentLeague != settings.CurrentLeague {
+	if read.CurrentTeamKey != "" || read.CurrentLeague != "temporary.league" {
 		t.Fatalf("saved config=%#v", read)
+	}
+	info, err := os.Stat(configPath)
+	if err != nil || info.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("config permissions=%v err=%v", info.Mode().Perm(), err)
 	}
 	if _, err := os.Stat(databasePath); !os.IsNotExist(err) {
 		t.Fatalf("status created database: %v", err)
+	}
+}
+
+func TestStatusWithoutChangedSelectionDoesNotRewriteConfiguration(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "config.json")
+	databasePath := filepath.Join(root, "absent.db")
+	settings := config.Config{CurrentLeague: "saved.league", CurrentTeamKey: "saved.team"}
+	if err := config.WriteAt(configPath, settings); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, requested := range []string{"", "saved.league"} {
+		if _, err := Status(LocalOptions{ConfigPath: configPath, DatabasePath: databasePath, Mode: terminal.Plain}, requested); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("unchanged selection rewrote configuration: before=%q after=%q", before, after)
 	}
 }
 

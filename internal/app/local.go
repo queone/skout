@@ -21,7 +21,7 @@ type LocalOptions struct {
 	Mode         terminal.ColorMode
 }
 
-// StatusProduction renders status without opening a writable database.
+// StatusProduction renders status and persists an explicit league selection.
 func StatusProduction(requestedLeague string, mode terminal.ColorMode) (string, error) {
 	configPath, err := config.Path()
 	if err != nil {
@@ -34,7 +34,7 @@ func StatusProduction(requestedLeague string, mode terminal.ColorMode) (string, 
 	return Status(LocalOptions{ConfigPath: configPath, DatabasePath: databasePath, Now: time.Now, Mode: mode}, requestedLeague)
 }
 
-// Status renders the fixed-order local dashboard without persisting overrides.
+// Status renders the fixed-order local dashboard and persists an explicit league selection.
 func Status(options LocalOptions, requestedLeague string) (string, error) {
 	if options.ConfigPath == "" || options.DatabasePath == "" {
 		return "", fmt.Errorf("status: local paths are incomplete; configure both paths and retry")
@@ -43,15 +43,18 @@ func Status(options LocalOptions, requestedLeague string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("status: read configuration: %w", err)
 	}
-	view := settings
-	if strings.TrimSpace(requestedLeague) != "" {
-		view.CurrentLeague = requestedLeague
+	if selected := strings.TrimSpace(requestedLeague); selected != "" && settings.CurrentLeague != selected {
+		settings.CurrentLeague = selected
+		settings.CurrentTeamKey = ""
+		if err := config.WriteAt(options.ConfigPath, settings); err != nil {
+			return "", fmt.Errorf("status: save league selection: %w", err)
+		}
 	}
-	status, err := store.InspectStatusAt(options.DatabasePath, view.CurrentLeague)
+	status, err := store.InspectStatusAt(options.DatabasePath, settings.CurrentLeague)
 	if err != nil {
 		return "", fmt.Errorf("status: inspect database: %w", err)
 	}
-	return RenderStatus(options.DatabasePath, options.ConfigPath, view, status, options.Mode), nil
+	return RenderStatus(options.DatabasePath, options.ConfigPath, settings, status, options.Mode), nil
 }
 
 // RenderStatus renders the frozen status fields in their contracted order.
