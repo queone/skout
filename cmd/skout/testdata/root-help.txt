@@ -1,0 +1,39 @@
+skout v0.1.0
+Fantasy Baseball advisor — github.com/queone/skout
+
+USAGE
+  skout <command> [flags]
+
+COMMANDS
+  st                           Show status
+  sync                         Synchronize the selected league
+    -T, --team <TEAM>          Select the primary fantasy team
+  reset                        Delete the local skout database
+  m [team]                     Show a daily or weekly matchup
+    -w, --week <WEEK>          Show a specific matchup week
+    -W, --weekly               Show weekly running totals
+    -D, --day <MMM-DD>         Show stats for a specific day
+  t [team]                     Show MLB 40-man rosters
+    -f, --force                Refresh provider data
+  tt                           Show MLB standings and team totals
+    -f, --force                Refresh provider data
+  sp                           Show the three-day probable-pitcher slate
+    -f, --force                Refresh provider data
+  r [name]                     Show a fantasy roster
+  rt                           Show fantasy roster totals
+    -w, --weekly [<WEEK|DATE>] Show current or selected weekly totals
+  h [N|name]                   Browse hitters or show a player
+    -s, --sort <FIELD>         Sort by a displayed field
+    -p, --position <POS>       Filter by eligible position
+    -w, --waiver               Show available Yahoo pickup players
+  p [N|name]                   Browse pitchers or show a player
+    -s, --sort <FIELD>         Sort by a displayed field
+    -p, --position <POS>       Filter by eligible position
+    -w, --waiver               Show available Yahoo pickup players
+  i [term]                     Look up a term in the skout glossary
+
+FLAGS
+  -l, --league <key>           Yahoo league key
+  -d, --debug                  Print operation diagnostics
+  -v, --version                Print version
+  -h, -?, --help               Print this help
