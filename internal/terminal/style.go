@@ -56,6 +56,62 @@ func Alias(value string, mode ColorMode) string {
 	return style(value, "38;5;245", mode)
 }
 
+// TableHeading styles MLB display headings with the established blue role.
+func TableHeading(value string, mode ColorMode) string {
+	return style(value, "38;5;33", mode)
+}
+
+// Dim styles secondary MLB context with the shared gray role.
+func Dim(value string, mode ColorMode) string {
+	return style(value, "38;5;245", mode)
+}
+
+// Good styles favorable MLB context with the shared green role.
+func Good(value string, mode ColorMode) string {
+	return style(value, "38;5;34", mode)
+}
+
+// Warning styles warnings and current-roster context with the shared yellow role.
+func Warning(value string, mode ColorMode) string {
+	return style(value, "38;5;100", mode)
+}
+
+// Injury styles unavailable status with the shared red role.
+func Injury(value string, mode ColorMode) string {
+	return style(value, "38;5;196", mode)
+}
+
+// RosterRow applies the active, injured-list, or off-active semantic tier.
+func RosterRow(value, status string, mode ColorMode) string {
+	if strings.HasPrefix(status, "D") {
+		return Warning(value, mode)
+	}
+	if status != "" && status != "A" {
+		return Dim(value, mode)
+	}
+	return value
+}
+
+// VisibleWidth returns the printable width of ANSI-styled text.
+func VisibleWidth(value string) int {
+	escape := false
+	width := 0
+	for _, character := range value {
+		if character == '\x1b' {
+			escape = true
+			continue
+		}
+		if escape {
+			if character == 'm' {
+				escape = false
+			}
+			continue
+		}
+		width++
+	}
+	return width
+}
+
 func style(value, role string, mode ColorMode) string {
 	if mode != Color {
 		return value

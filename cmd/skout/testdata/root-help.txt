@@ -1,4 +1,4 @@
-skout v0.2.0
+skout v0.3.0
 Fantasy Baseball advisor — github.com/queone/skout
 
 USAGE

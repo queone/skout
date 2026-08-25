@@ -39,6 +39,24 @@ func TestStyleRolesAreExactAndPlainModeHasNoANSI(t *testing.T) {
 	if got, want := Alias("Aliases: PA", Color), "\x1b[38;5;245mAliases: PA\x1b[0m"; got != want {
 		t.Errorf("Alias() = %q, want %q", got, want)
 	}
+	for name, got := range map[string]string{
+		"TableHeading": TableHeading("TEAM", Color),
+		"Dim":          Dim("context", Color),
+		"Good":         Good("available", Color),
+		"Warning":      Warning("warning", Color),
+		"Injury":       Injury("IL", Color),
+		"RosterRow":    RosterRow("row", "D10", Color),
+	} {
+		if !strings.HasPrefix(got, "\x1b[") || !strings.HasSuffix(got, "\x1b[0m") {
+			t.Errorf("%s color output=%q", name, got)
+		}
+		if VisibleWidth(got) == 0 {
+			t.Errorf("%s visible width is zero", name)
+		}
+	}
+	if got := RosterRow("row", "A", Color); got != "row" {
+		t.Errorf("active row=%q", got)
+	}
 
 	for name, output := range map[string]string{
 		"Usage":   Usage("Usage:", Plain),
