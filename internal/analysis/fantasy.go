@@ -217,6 +217,17 @@ func WaiverEligible(player domain.StoredFantasyPlayer, requestedPosition string,
 				floor = min(floor, value)
 			}
 		}
+		if requestedPosition != "" && math.IsInf(floor, 1) {
+			var values []float64
+			for _, value := range candidates {
+				if value.Role == "H" && value.PlateAppearances > 0 {
+					values = append(values, value.PlateAppearances)
+				}
+			}
+			if value, ok := Percentile(values, .60); ok {
+				floor = value
+			}
+		}
 		return candidate.PlateAppearances >= floor
 	}
 	var candidate *domain.WaiverCandidate
@@ -229,10 +240,10 @@ func WaiverEligible(player domain.StoredFantasyPlayer, requestedPosition string,
 	if candidate == nil {
 		return false
 	}
-	starter := ClassifyPitcher(candidate.Positions, false, nil, float64(candidate.Games), float64(candidate.GamesStarted)) == Starter
+	starter := candidate.GamesStarted*2 >= candidate.Games
 	var values []float64
 	for _, value := range candidates {
-		valueStarter := ClassifyPitcher(value.Positions, false, nil, float64(value.Games), float64(value.GamesStarted)) == Starter
+		valueStarter := value.GamesStarted*2 >= value.Games
 		if value.Role == "P" && valueStarter == starter && value.InningsPitched > 0 {
 			values = append(values, value.InningsPitched)
 		}

@@ -62,3 +62,38 @@ func TestWaiverEligibilitySeparatesRolesPositionsAndFallbackTier(t *testing.T) {
 		t.Fatal("qualified starter was mixed with the reliever opportunity pool")
 	}
 }
+
+func TestWaiverEligibilityUsesDedicatedPitcherCohortsAndGlobalHitterFallback(t *testing.T) {
+	yahooID := int64(10)
+	starterID := int64(20)
+	starter := domain.StoredFantasyPlayer{YahooPlayerID: &yahooID, MLBAMID: &starterID, Role: "P", Positions: "RP"}
+	pitchers := []domain.WaiverCandidate{
+		{MLBAMID: 20, Role: "P", Positions: "RP", InningsPitched: 60, Games: 20, GamesStarted: 10},
+		{MLBAMID: 21, Role: "P", Positions: "RP", InningsPitched: 40, Games: 20, GamesStarted: 10},
+		{MLBAMID: 22, Role: "P", Positions: "SP", InningsPitched: 500, Games: 20, GamesStarted: 9},
+	}
+	if !WaiverEligible(starter, "", pitchers) {
+		t.Fatal("50-percent-start boundary or matching starter cohort was not applied")
+	}
+
+	hitterID := int64(30)
+	hitter := domain.StoredFantasyPlayer{YahooPlayerID: &yahooID, MLBAMID: &hitterID, Role: "B", Positions: "OF"}
+	hitters := []domain.WaiverCandidate{
+		{MLBAMID: 30, Role: "H", Positions: "OF", PlateAppearances: 80},
+		{MLBAMID: 31, Role: "H", Positions: "OF", PlateAppearances: 20},
+		{MLBAMID: 32, Role: "H", Positions: "SS", PlateAppearances: 60},
+	}
+	if !WaiverEligible(hitter, "C", hitters) {
+		t.Fatal("empty requested-position cohort did not fall back to all qualified hitters")
+	}
+	owner := "Rostered"
+	hitter.Owner = &owner
+	if WaiverEligible(hitter, "C", hitters) {
+		t.Fatal("owned hitter qualified")
+	}
+	hitter.Owner = nil
+	hitter.MLBAMID = nil
+	if WaiverEligible(hitter, "C", hitters) {
+		t.Fatal("hitter without MLB identity qualified")
+	}
+}

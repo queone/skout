@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,7 +20,11 @@ import (
 	"github.com/queone/skout/internal/store"
 )
 
-const syncPipelineVersion = "provider-sync-v1"
+const (
+	syncPipelineVersion    = "provider-sync-v1"
+	yahooSyncParallelLimit = 4
+	terminalLineReset      = "\r\x1b[2K"
+)
 
 // SyncOptions contains production process evidence for foreground synchronization.
 type SyncOptions struct {
@@ -32,6 +37,7 @@ type SyncOptions struct {
 	Output         io.Writer
 	InputTerminal  bool
 	PromptTerminal bool
+	OutputTerminal bool
 }
 
 // SyncStepResult is one successful provider-step result.
@@ -62,9 +68,11 @@ type SyncService struct {
 	Prompt           io.Writer
 	Output           io.Writer
 	InputTerminal    bool
+	OutputTerminal   bool
 	Origin           store.SyncOrigin
 	lockHeld         bool
 	startReported    bool
+	yahooProgress    *syncProgressLine
 }
 
 type syncOutcome struct {
@@ -80,6 +88,72 @@ type matchupHistory struct {
 	week     int
 	matchups []domain.Matchup
 	rosters  []domain.RosterWeekStats
+}
+
+type syncProgressLine struct {
+	output           io.Writer
+	terminal         bool
+	prefix           string
+	current          string
+	players          int
+	matchupsComplete int
+	matchupsTotal    int
+}
+
+func newSyncProgressLine(output io.Writer, terminal bool, prefix string) *syncProgressLine {
+	return &syncProgressLine{output: output, terminal: terminal, prefix: prefix, current: prefix}
+}
+
+func (line *syncProgressLine) reportPlayers(count int) {
+	if count < line.players || count == line.players && line.current != line.prefix {
+		return
+	}
+	line.players = count
+	line.renderProgress()
+}
+
+func (line *syncProgressLine) reportMatchups(completed, total int) {
+	if total <= 0 || completed < line.matchupsComplete || completed > total {
+		return
+	}
+	if completed == line.matchupsComplete && total == line.matchupsTotal {
+		return
+	}
+	line.matchupsComplete = completed
+	line.matchupsTotal = total
+	line.renderProgress()
+}
+
+func (line *syncProgressLine) renderProgress() {
+	value := fmt.Sprintf("%s (%d)", line.prefix, line.players)
+	if line.matchupsTotal > 0 {
+		value = fmt.Sprintf("%s (%d; matchups %d/%d)", line.prefix, line.players, line.matchupsComplete, line.matchupsTotal)
+	}
+	line.current = value
+	if line.terminal {
+		_ = writeSyncOutput(line.output, terminalLineReset+value)
+	}
+}
+
+func (line *syncProgressLine) suspend() error {
+	if !line.terminal {
+		return nil
+	}
+	return writeSyncOutput(line.output, terminalLineReset)
+}
+
+func (line *syncProgressLine) resume() error {
+	if !line.terminal {
+		return nil
+	}
+	return writeSyncOutput(line.output, terminalLineReset+line.current)
+}
+
+func (line *syncProgressLine) finish(suffix string) error {
+	if line.terminal {
+		return writeSyncOutput(line.output, terminalLineReset+line.prefix+suffix+"\n")
+	}
+	return writeSyncOutput(line.output, suffix+"\n")
 }
 
 // Run executes one ordered foreground synchronization.
@@ -236,7 +310,12 @@ func (service *SyncService) Run(leagueOverride, teamOverride string) (string, er
 }
 
 func (service *SyncService) runSyncItem(source, item, scope string, action func(*store.Store) (SyncStepResult, error)) syncOutcome {
-	if err := writeSyncOutput(service.Output, fmt.Sprintf("==> %s %s: fetching", source, item)); err != nil {
+	prefix := fmt.Sprintf("==> %s %s: fetching", source, item)
+	if source == "yahoo_public" && item == "fantasy" {
+		service.yahooProgress = newSyncProgressLine(service.Output, service.OutputTerminal, prefix)
+	}
+	if err := writeSyncOutput(service.Output, prefix); err != nil {
+		service.yahooProgress = nil
 		return syncOutcome{source: source, item: item, detail: "write progress: " + err.Error()}
 	}
 	policy := store.ItemRefreshPolicy{TTL: 30 * time.Minute, Force: service.Origin == store.OriginManual, PipelineVersion: syncPipelineVersion}
@@ -287,8 +366,39 @@ func (service *SyncService) finishOutcome(outcome syncOutcome) syncOutcome {
 	} else {
 		line += " (" + strconv.FormatInt(outcome.count, 10) + ")"
 	}
-	_ = writeSyncOutput(service.Output, line+"\n")
+	if service.yahooProgress != nil && outcome.source == "yahoo_public" && outcome.item == "fantasy" {
+		_ = service.yahooProgress.finish(line)
+		service.yahooProgress = nil
+	} else {
+		_ = writeSyncOutput(service.Output, line+"\n")
+	}
 	return outcome
+}
+
+func (service *SyncService) reportYahooPlayers(count int) {
+	if service.yahooProgress != nil {
+		service.yahooProgress.reportPlayers(count)
+	}
+}
+
+func (service *SyncService) reportYahooMatchups(completed, total int) {
+	if service.yahooProgress != nil {
+		service.yahooProgress.reportMatchups(completed, total)
+	}
+}
+
+func (service *SyncService) suspendYahooProgress() error {
+	if service.yahooProgress == nil {
+		return nil
+	}
+	return service.yahooProgress.suspend()
+}
+
+func (service *SyncService) resumeYahooProgress() error {
+	if service.yahooProgress == nil {
+		return nil
+	}
+	return service.yahooProgress.resume()
 }
 
 func (service *SyncService) synchronizeYahoo(database *store.Store, leagueKey, teamOverride, savedTeam string) (string, int64, error) {
@@ -304,23 +414,32 @@ func (service *SyncService) synchronizeYahoo(database *store.Store, leagueKey, t
 	for _, team := range teams {
 		teamKeys = append(teamKeys, team.TeamKey)
 	}
-	rosters, err := service.Yahoo.LeagueRosters(leagueKey, teamKeys)
+	rosters, err := service.Yahoo.LeagueRosters(leagueKey, teamKeys, func(count int) {
+		service.reportYahooPlayers(count)
+	})
 	if err != nil {
 		return "", 0, fmt.Errorf("fetch public Yahoo rosters: %w", err)
 	}
-	freeAgents, err := service.Yahoo.FreeAgents(leagueKey)
+	service.reportYahooPlayers(len(rosters.Players))
+	freeAgents, err := service.Yahoo.FreeAgents(leagueKey, func(count int) {
+		service.reportYahooPlayers(len(rosters.Players) + count)
+	})
 	if err != nil {
 		return "", 0, fmt.Errorf("fetch public Yahoo free agents: %w", err)
 	}
+	service.reportYahooPlayers(len(rosters.Players) + len(freeAgents))
 	requestedTeam := strings.TrimSpace(teamOverride)
 	if requestedTeam == "" {
 		requestedTeam = strings.TrimSpace(savedTeam)
 	}
-	teamKey, err := SelectPrimaryTeam(teams, requestedTeam, service.InputTerminal, service.Input, service.Prompt)
+	teamKey, err := selectPrimaryTeam(teams, requestedTeam, service.InputTerminal, service.Input, service.Prompt, service.suspendYahooProgress, service.resumeYahooProgress)
 	if err != nil {
 		return "", 0, err
 	}
-	history, err := acquireMatchupHistory(service.Yahoo, leagueKey, teamKey, settings.CurrentWeek)
+	if settings.CurrentWeek != nil && *settings.CurrentWeek > 0 {
+		service.reportYahooMatchups(0, *settings.CurrentWeek)
+	}
+	history, err := acquireMatchupHistory(service.Yahoo, leagueKey, teamKey, settings.CurrentWeek, service.reportYahooMatchups)
 	if err != nil {
 		return "", 0, err
 	}
@@ -356,6 +475,10 @@ func (service *SyncService) synchronizeYahoo(database *store.Store, leagueKey, t
 
 // SelectPrimaryTeam resolves exact or unique case-insensitive team matches.
 func SelectPrimaryTeam(teams []domain.FantasyTeam, requested string, interactive bool, input io.Reader, prompt io.Writer) (string, error) {
+	return selectPrimaryTeam(teams, requested, interactive, input, prompt, nil, nil)
+}
+
+func selectPrimaryTeam(teams []domain.FantasyTeam, requested string, interactive bool, input io.Reader, prompt io.Writer, beforePrompt, afterPrompt func() error) (string, error) {
 	query := strings.TrimSpace(requested)
 	if query != "" {
 		for _, team := range teams {
@@ -400,6 +523,11 @@ func SelectPrimaryTeam(teams []domain.FantasyTeam, requested string, interactive
 	if prompt == nil {
 		prompt = io.Discard
 	}
+	if beforePrompt != nil {
+		if err := beforePrompt(); err != nil {
+			return "", fmt.Errorf("select primary team: suspend progress: %w", err)
+		}
+	}
 	if _, err := io.WriteString(prompt, "Select your primary team:\n"); err != nil {
 		return "", fmt.Errorf("select primary team: write selection: %w", err)
 	}
@@ -419,37 +547,93 @@ func SelectPrimaryTeam(teams []domain.FantasyTeam, requested string, interactive
 	if parseErr != nil || selected < 1 || selected > len(teams) {
 		return "", fmt.Errorf("select primary team: enter one of the displayed numbers and retry")
 	}
+	if afterPrompt != nil {
+		if err := afterPrompt(); err != nil {
+			return "", fmt.Errorf("select primary team: redraw progress: %w", err)
+		}
+	}
 	return teams[selected-1].TeamKey, nil
 }
 
-func acquireMatchupHistory(source providers.YahooFantasySource, leagueKey, teamKey string, currentWeek *int) ([]matchupHistory, error) {
-	if currentWeek == nil {
+func acquireMatchupHistory(source providers.YahooFantasySource, leagueKey, teamKey string, currentWeek *int, progress func(completed, total int)) ([]matchupHistory, error) {
+	if currentWeek == nil || *currentWeek <= 0 {
 		return nil, nil
 	}
-	var history []matchupHistory
-	for week := 1; week <= *currentWeek; week++ {
-		selectedWeek := week
-		matchups, err := source.Scoreboard(leagueKey, &selectedWeek)
-		if err != nil {
-			return nil, fmt.Errorf("sync matchup history: %w", err)
-		}
-		entry := matchupHistory{week: week, matchups: matchups}
-		for _, matchup := range matchups {
-			if matchup.Teams[0].TeamKey != teamKey && matchup.Teams[1].TeamKey != teamKey {
-				continue
+	type historyResult struct {
+		week  int
+		entry matchupHistory
+		err   error
+	}
+	workerCount := min(yahooSyncParallelLimit, *currentWeek)
+	jobs := make(chan int, workerCount)
+	results := make(chan historyResult, workerCount)
+	var workers sync.WaitGroup
+	for range workerCount {
+		workers.Go(func() {
+			for week := range jobs {
+				entry, err := fetchMatchupHistoryWeek(source, leagueKey, teamKey, week)
+				results <- historyResult{week: week, entry: entry, err: err}
 			}
-			for _, team := range matchup.Teams {
-				roster, err := source.RosterWeekStats(team.TeamKey, week)
-				if err != nil {
-					return nil, fmt.Errorf("sync matchup roster history: %w", err)
+		})
+	}
+	history := make([]matchupHistory, *currentWeek)
+	next, outstanding := 1, 0
+	for outstanding < workerCount && next <= *currentWeek {
+		jobs <- next
+		next++
+		outstanding++
+	}
+	completed := 0
+	var firstErr error
+	for outstanding > 0 {
+		result := <-results
+		outstanding--
+		if firstErr == nil {
+			if result.err != nil {
+				firstErr = result.err
+			} else {
+				history[result.week-1] = result.entry
+				completed++
+				if progress != nil {
+					progress(completed, *currentWeek)
 				}
-				entry.rosters = append(entry.rosters, roster)
+				if next <= *currentWeek {
+					jobs <- next
+					next++
+					outstanding++
+				}
 			}
-			break
 		}
-		history = append(history, entry)
+	}
+	close(jobs)
+	workers.Wait()
+	if firstErr != nil {
+		return nil, firstErr
 	}
 	return history, nil
+}
+
+func fetchMatchupHistoryWeek(source providers.YahooFantasySource, leagueKey, teamKey string, week int) (matchupHistory, error) {
+	selectedWeek := week
+	matchups, err := source.Scoreboard(leagueKey, &selectedWeek)
+	if err != nil {
+		return matchupHistory{}, fmt.Errorf("sync matchup history: %w", err)
+	}
+	entry := matchupHistory{week: week, matchups: matchups}
+	for _, matchup := range matchups {
+		if matchup.Teams[0].TeamKey != teamKey && matchup.Teams[1].TeamKey != teamKey {
+			continue
+		}
+		for _, team := range matchup.Teams {
+			roster, rosterErr := source.RosterWeekStats(team.TeamKey, week)
+			if rosterErr != nil {
+				return matchupHistory{}, fmt.Errorf("sync matchup roster history: %w", rosterErr)
+			}
+			entry.rosters = append(entry.rosters, roster)
+		}
+		break
+	}
+	return entry, nil
 }
 
 type syncGuard struct{ file *os.File }

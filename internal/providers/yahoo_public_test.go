@@ -6,8 +6,13 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/queone/skout/internal/domain"
 	"github.com/queone/skout/internal/transport"
@@ -69,28 +74,38 @@ func TestYahooRedzoneFixtureNormalizesCompleteLeagueAndAggregatesMatchup(t *test
 
 func TestYahooPublicSourceUsesExactCredentialFreePathsAndDormantDailyMethod(t *testing.T) {
 	requests := []transport.ValidatedRequest{}
+	var requestsMu sync.Mutex
+	settingsResponse := fixtureResponse(t, "testdata/yahoo/league-settings.json")
+	standingsResponse := fixtureResponse(t, "testdata/yahoo/standings.json")
+	rosterOneResponse := fixtureResponse(t, "testdata/yahoo/roster-team-1.json")
+	rosterTwoResponse := fixtureResponse(t, "testdata/yahoo/roster-team-2.json")
+	freeAgentsResponse := fixtureResponse(t, "testdata/yahoo/free-agents.json")
+	matchupResponse := fixtureResponse(t, "testdata/yahoo/matchup.json")
+	weeklyResponse := fixtureResponse(t, "testdata/yahoo/weekly-stats.json")
 	executor := providerExecutor{execute: func(request transport.ValidatedRequest) (transport.Response, error) {
+		requestsMu.Lock()
 		requests = append(requests, request)
-		switch len(requests) {
-		case 1:
-			return fixtureResponse(t, "testdata/yahoo/league-settings.json"), nil
-		case 2:
-			return fixtureResponse(t, "testdata/yahoo/standings.json"), nil
-		case 3:
-			return fixtureResponse(t, "testdata/yahoo/roster-team-1.json"), nil
-		case 4:
-			return fixtureResponse(t, "testdata/yahoo/roster-team-2.json"), nil
-		case 5:
-			return fixtureResponse(t, "testdata/yahoo/free-agents.json"), nil
-		case 6:
+		requestsMu.Unlock()
+		target := request.URL()
+		switch {
+		case strings.Contains(target, "/settings?"):
+			return settingsResponse, nil
+		case strings.Contains(target, "/standings?"):
+			return standingsResponse, nil
+		case strings.Contains(target, ".t.1/roster/players"):
+			return rosterOneResponse, nil
+		case strings.Contains(target, ".t.2/roster/players"):
+			return rosterTwoResponse, nil
+		case strings.Contains(target, "players;status=A;start=0"):
+			return freeAgentsResponse, nil
+		case strings.Contains(target, "players;status=A;start=100"):
 			return transport.Response{Status: 200, Body: []byte(`{"data":[]}`)}, nil
-		case 7:
-			return fixtureResponse(t, "testdata/yahoo/matchup.json"), nil
-		case 8, 9:
-			return fixtureResponse(t, "testdata/yahoo/weekly-stats.json"), nil
+		case strings.Contains(target, "/scoreboard;week=7"):
+			return matchupResponse, nil
+		case strings.Contains(target, "/roster;week=7/"), strings.Contains(target, "/roster;date=2026-05-11/"):
+			return weeklyResponse, nil
 		default:
-			t.Fatalf("unexpected request %s", request.URL())
-			return transport.Response{}, nil
+			return transport.Response{}, fmt.Errorf("unexpected request %s", target)
 		}
 	}}
 	client := NewProductionYahooPublicClient(transport.New(executor))
@@ -102,10 +117,10 @@ func TestYahooPublicSourceUsesExactCredentialFreePathsAndDormantDailyMethod(t *t
 		t.Fatal(err)
 	}
 	keys := []string{teams[0].TeamKey, teams[1].TeamKey}
-	if _, err := client.LeagueRosters("mlb.l.1", keys); err != nil {
+	if _, err := client.LeagueRosters("mlb.l.1", keys, nil); err != nil {
 		t.Fatal(err)
 	}
-	if players, err := client.FreeAgents("mlb.l.1"); err != nil || len(players) != 2 {
+	if players, err := client.FreeAgents("mlb.l.1", nil); err != nil || len(players) != 2 {
 		t.Fatalf("free agents=%#v err=%v", players, err)
 	}
 	week := 7
@@ -129,7 +144,10 @@ func TestYahooPublicSourceUsesExactCredentialFreePathsAndDormantDailyMethod(t *t
 		"https://pub-api-ro.fantasysports.yahoo.com/fantasy/v2/team/mlb.l.1.t.1/roster;week=7/players/stats;type=week;week=7?format=json",
 		"https://pub-api-ro.fantasysports.yahoo.com/fantasy/v2/team/mlb.l.1.t.1/roster;date=2026-05-11/players/stats;type=date;date=2026-05-11?format=json",
 	}
-	if got := requestURLs(requests); !reflect.DeepEqual(got, want) {
+	got := requestURLs(requests)
+	sort.Strings(got)
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("URLs=\n%q\nwant=\n%q", got, want)
 	}
 	for _, request := range requests {
@@ -233,17 +251,153 @@ func TestYahooFreeAgentPaginationDeduplicatesAndRejectsAnUnboundedCollection(t *
 			return transport.Response{Status: 200, Body: []byte(`{"data":[]}`)}, nil
 		}
 	}}))
-	players, err := client.FreeAgents("mlb.l.1")
+	var progress []int
+	players, err := client.FreeAgents("mlb.l.1", func(count int) { progress = append(progress, count) })
 	if err != nil || len(players) != 199 || players[0].YahooPlayerID != 1 || players[198].YahooPlayerID != 199 {
 		t.Fatalf("players=%d err=%v", len(players), err)
+	}
+	if !reflect.DeepEqual(progress, []int{100, 199}) {
+		t.Fatalf("progress=%v", progress)
 	}
 	call = 0
 	client = NewProductionYahooPublicClient(transport.New(providerExecutor{execute: func(transport.ValidatedRequest) (transport.Response, error) {
 		call++
 		return transport.Response{Status: 200, Body: page((call-1)*100+1, 100)}, nil
 	}}))
-	if _, err := client.FreeAgents("mlb.l.1"); err == nil || !strings.Contains(err.Error(), "exceeds 4,000") || call != 41 {
+	if _, err := client.FreeAgents("mlb.l.1", nil); err == nil || !strings.Contains(err.Error(), "exceeds 4,000") || call != 41 {
 		t.Fatalf("error=%v calls=%d", err, call)
+	}
+}
+
+func TestYahooLeagueRostersBoundsConcurrencyAndSerializesProgress(t *testing.T) {
+	teamOrder := []int{8, 1, 7, 2, 6, 3, 5, 4}
+	teamKeys := make([]string, len(teamOrder))
+	for index, teamID := range teamOrder {
+		teamKeys[index] = fmt.Sprintf("mlb.l.1.t.%d", teamID)
+	}
+	started := make(chan struct{}, len(teamKeys))
+	release := make(chan struct{})
+	var active, maximum atomic.Int64
+	client := NewProductionYahooPublicClient(transport.New(providerExecutor{execute: func(request transport.ValidatedRequest) (transport.Response, error) {
+		current := active.Add(1)
+		for current > maximum.Load() && !maximum.CompareAndSwap(maximum.Load(), current) {
+		}
+		started <- struct{}{}
+		<-release
+		active.Add(-1)
+		target, _ := url.Parse(request.URL())
+		teamPart := strings.Split(strings.Split(target.Path, ".t.")[1], "/")[0]
+		playerID, _ := strconv.Atoi(teamPart)
+		payload, _ := json.Marshal(map[string]any{"data": map[string]any{"players": []map[string]any{{
+			"player_id": playerID, "full": fmt.Sprintf("Player %d", playerID), "position_type": "B", "display_position": "OF",
+			"eligible_positions": []string{"OF"}, "selected_position": map[string]any{"position": "OF"},
+		}}}})
+		return transport.Response{Status: 200, Body: payload}, nil
+	}}))
+	type acquisition struct {
+		rosters LeagueRosters
+		err     error
+	}
+	result := make(chan acquisition, 1)
+	var progressActive, progressMaximum atomic.Int64
+	var counts []int
+	go func() {
+		rosters, err := client.LeagueRosters("mlb.l.1", teamKeys, func(count int) {
+			current := progressActive.Add(1)
+			for current > progressMaximum.Load() && !progressMaximum.CompareAndSwap(progressMaximum.Load(), current) {
+			}
+			counts = append(counts, count)
+			progressActive.Add(-1)
+		})
+		result <- acquisition{rosters: rosters, err: err}
+	}()
+	for range yahooParallelLimit {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("roster workers did not reach bounded concurrency")
+		}
+	}
+	select {
+	case <-started:
+		t.Fatal("more than four roster requests started before one completed")
+	default:
+	}
+	close(release)
+	var got acquisition
+	select {
+	case got = <-result:
+	case <-time.After(2 * time.Second):
+		t.Fatal("roster workers did not join")
+	}
+	if got.err != nil || len(got.rosters.Players) != len(teamKeys) {
+		t.Fatalf("rosters=%#v err=%v", got.rosters, got.err)
+	}
+	if maximum.Load() != yahooParallelLimit || active.Load() != 0 || progressMaximum.Load() != 1 || progressActive.Load() != 0 {
+		t.Fatalf("request concurrency=%d active=%d progress concurrency=%d progress active=%d", maximum.Load(), active.Load(), progressMaximum.Load(), progressActive.Load())
+	}
+	if !reflect.DeepEqual(counts, []int{1, 2, 3, 4, 5, 6, 7, 8}) {
+		t.Fatalf("progress=%v", counts)
+	}
+	for index, player := range got.rosters.Players {
+		if player.YahooPlayerID != int64(index+1) {
+			t.Fatalf("player order=%#v", got.rosters.Players)
+		}
+	}
+	for _, slot := range got.rosters.Slots {
+		if slot.TeamKey != fmt.Sprintf("mlb.l.1.t.%d", slot.YahooPlayerID) {
+			t.Fatalf("roster payload was associated with the wrong input team: %#v", slot)
+		}
+	}
+}
+
+func TestYahooLeagueRostersStopsSchedulingAndReturnsNoPartialResultAfterFailure(t *testing.T) {
+	teamKeys := make([]string, 10)
+	for index := range teamKeys {
+		teamKeys[index] = fmt.Sprintf("mlb.l.1.t.%d", index+1)
+	}
+	started := make(chan struct{}, len(teamKeys))
+	release := make(chan struct{})
+	var calls, active atomic.Int64
+	client := NewProductionYahooPublicClient(transport.New(providerExecutor{execute: func(request transport.ValidatedRequest) (transport.Response, error) {
+		calls.Add(1)
+		active.Add(1)
+		defer active.Add(-1)
+		started <- struct{}{}
+		if strings.Contains(request.URL(), ".t.1/") {
+			return transport.Response{}, errors.New("roster unavailable")
+		}
+		<-release
+		return transport.Response{Status: 200, Body: []byte(`{"data":{"players":[{"player_id":9,"full":"Nine","position_type":"B","display_position":"OF","eligible_positions":["OF"],"selected_position":{"position":"OF"}}]}}`)}, nil
+	}}))
+	result := make(chan error, 1)
+	progressCalls := atomic.Int64{}
+	go func() {
+		rosters, err := client.LeagueRosters("mlb.l.1", teamKeys, func(int) { progressCalls.Add(1) })
+		if len(rosters.Players) != 0 || len(rosters.Slots) != 0 {
+			result <- fmt.Errorf("partial roster returned: %#v", rosters)
+			return
+		}
+		result <- err
+	}()
+	for range yahooParallelLimit {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("initial roster workers did not start")
+		}
+	}
+	close(release)
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "roster unavailable") {
+			t.Fatalf("error=%v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("failed roster workers did not join")
+	}
+	if calls.Load() >= int64(len(teamKeys)) || active.Load() != 0 || progressCalls.Load() != 0 {
+		t.Fatalf("calls=%d active=%d progress=%d", calls.Load(), active.Load(), progressCalls.Load())
 	}
 }
 

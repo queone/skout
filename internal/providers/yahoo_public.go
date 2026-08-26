@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/queone/skout/internal/domain"
@@ -20,6 +21,7 @@ const (
 	yahooRankBatchSize     = 50
 	yahooFreeAgentPageSize = 100
 	yahooMaxFreeAgentPages = 40
+	yahooParallelLimit     = 4
 	yahooHiddenPlaceholder = "--hidden--"
 )
 
@@ -244,30 +246,97 @@ func (client *YahooPublicClient) Standings(leagueKey string) ([]domain.FantasyTe
 }
 
 // LeagueRosters fetches each team separately because Yahoo may omit echoed keys.
-func (client *YahooPublicClient) LeagueRosters(_ string, teamKeys []string) (LeagueRosters, error) {
+func (client *YahooPublicClient) LeagueRosters(_ string, teamKeys []string, progress YahooPlayerProgress) (LeagueRosters, error) {
 	if len(teamKeys) == 0 {
 		return LeagueRosters{}, yahooFantasyError(YahooIncompleteError, "league roster has no team keys")
 	}
-	payloads := make([][]byte, 0, len(teamKeys))
 	for _, teamKey := range teamKeys {
 		if !validYahooTeamKey(teamKey) {
 			return LeagueRosters{}, yahooFantasyError(YahooInvalidInputError, "team key is invalid")
 		}
-		payload, err := client.getJSON(yahooJoin(client.endpoints.Fantasy, "/team/"+teamKey+"/roster/players;out=ranks,percent_owned,percent_started?format=json"))
-		if err != nil {
-			return LeagueRosters{}, err
-		}
-		payloads = append(payloads, payload)
 	}
-	return ParseTeamRosters(teamKeys, payloads)
+	type rosterResult struct {
+		index   int
+		payload []byte
+		players []domain.FantasyPlayer
+		err     error
+	}
+	workerCount := min(yahooParallelLimit, len(teamKeys))
+	jobs := make(chan int, workerCount)
+	results := make(chan rosterResult, workerCount)
+	var workers sync.WaitGroup
+	for range workerCount {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for index := range jobs {
+				teamKey := teamKeys[index]
+				payload, err := client.getJSON(yahooJoin(client.endpoints.Fantasy, "/team/"+teamKey+"/roster/players;out=ranks,percent_owned,percent_started?format=json"))
+				result := rosterResult{index: index, payload: payload, err: err}
+				if err == nil {
+					parsed, parseErr := ParseTeamRosters([]string{teamKey}, [][]byte{payload})
+					result.err = parseErr
+					result.players = parsed.Players
+				}
+				results <- result
+			}
+		}()
+	}
+	payloads := make([][]byte, len(teamKeys))
+	next, outstanding := 0, 0
+	for outstanding < workerCount && next < len(teamKeys) {
+		jobs <- next
+		next++
+		outstanding++
+	}
+	seen := make(map[int64]struct{})
+	lastCount := 0
+	var firstErr error
+	for outstanding > 0 {
+		result := <-results
+		outstanding--
+		if firstErr == nil {
+			if result.err != nil {
+				firstErr = result.err
+			} else {
+				payloads[result.index] = result.payload
+				for _, player := range result.players {
+					seen[player.YahooPlayerID] = struct{}{}
+				}
+				if progress != nil && len(seen) != lastCount {
+					lastCount = len(seen)
+					progress(lastCount)
+				}
+				if next < len(teamKeys) {
+					jobs <- next
+					next++
+					outstanding++
+				}
+			}
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	if firstErr != nil {
+		return LeagueRosters{}, firstErr
+	}
+	rosters, err := ParseTeamRosters(teamKeys, payloads)
+	if err != nil {
+		return LeagueRosters{}, err
+	}
+	if progress != nil && len(rosters.Players) > lastCount {
+		progress(len(rosters.Players))
+	}
+	return rosters, nil
 }
 
 // FreeAgents fetches all available players through bounded pagination.
-func (client *YahooPublicClient) FreeAgents(leagueKey string) ([]domain.FantasyPlayer, error) {
+func (client *YahooPublicClient) FreeAgents(leagueKey string, progress YahooPlayerProgress) ([]domain.FantasyPlayer, error) {
 	if !validYahooLeagueKey(leagueKey) {
 		return nil, yahooFantasyError(YahooInvalidInputError, "league key is invalid")
 	}
 	unique := map[int64]domain.FantasyPlayer{}
+	lastCount := 0
 	for page := 0; page <= yahooMaxFreeAgentPages; page++ {
 		offset := page * yahooFreeAgentPageSize
 		path := fmt.Sprintf("/league/%s/players;status=A;start=%d;count=%d;out=ranks,percent_owned,percent_started?format=json", leagueKey, offset, yahooFreeAgentPageSize)
@@ -295,6 +364,10 @@ func (client *YahooPublicClient) FreeAgents(leagueKey string) ([]domain.FantasyP
 		}
 		for _, player := range rows {
 			unique[player.YahooPlayerID] = player
+		}
+		if progress != nil && len(unique) != lastCount {
+			lastCount = len(unique)
+			progress(lastCount)
 		}
 	}
 	panic("bounded Yahoo pagination did not terminate")

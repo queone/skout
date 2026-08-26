@@ -114,7 +114,7 @@ func ProductionHandlers(version string, context Context) Handlers {
 			return app.SyncProduction(app.SyncOptions{
 				Version: version, League: league, Team: team, Debug: debug,
 				Input: context.Stdin, Prompt: context.Prompt, Output: output,
-				InputTerminal: context.StdinIsTerminal, PromptTerminal: context.StderrIsTerminal,
+				InputTerminal: context.StdinIsTerminal, PromptTerminal: context.StderrIsTerminal, OutputTerminal: context.StdoutIsTerminal,
 			})
 		},
 		Reset: func(input io.Reader, output io.Writer) error {

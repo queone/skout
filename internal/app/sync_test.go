@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,10 +23,14 @@ import (
 
 type syncYahooFixture struct {
 	failFreeAgents bool
+	currentWeek    int
 }
 
 func (fixture syncYahooFixture) LeagueSettings(league string) (providers.LeagueSettings, error) {
-	week := 1
+	week := fixture.currentWeek
+	if week == 0 {
+		week = 1
+	}
 	return providers.LeagueSettings{
 		League:          domain.League{LeagueKey: league, Name: "League", Season: 2026, NumTeams: 2, ScoringType: domain.ScoringHeadToHead},
 		CurrentWeek:     &week,
@@ -40,8 +46,8 @@ func (fixture syncYahooFixture) Standings(league string) ([]domain.FantasyTeam, 
 	}, nil
 }
 
-func (fixture syncYahooFixture) LeagueRosters(league string, _ []string) (providers.LeagueRosters, error) {
-	return providers.LeagueRosters{
+func (fixture syncYahooFixture) LeagueRosters(league string, _ []string, progress providers.YahooPlayerProgress) (providers.LeagueRosters, error) {
+	result := providers.LeagueRosters{
 		Players: []domain.FantasyPlayer{
 			{YahooPlayerID: 1, Name: "One", MLBTeam: "NYY", PositionType: "B", EligiblePositions: []domain.Position{domain.PositionOutfield}},
 			{YahooPlayerID: 2, Name: "Two", MLBTeam: "BOS", PositionType: "B", EligiblePositions: []domain.Position{domain.PositionOutfield}},
@@ -50,14 +56,22 @@ func (fixture syncYahooFixture) LeagueRosters(league string, _ []string) (provid
 			{TeamKey: league + ".t.1", YahooPlayerID: 1, SlotPosition: domain.PositionOutfield},
 			{TeamKey: league + ".t.2", YahooPlayerID: 2, SlotPosition: domain.PositionOutfield},
 		},
-	}, nil
+	}
+	if progress != nil {
+		progress(len(result.Players))
+	}
+	return result, nil
 }
 
-func (fixture syncYahooFixture) FreeAgents(string) ([]domain.FantasyPlayer, error) {
+func (fixture syncYahooFixture) FreeAgents(_ string, progress providers.YahooPlayerProgress) ([]domain.FantasyPlayer, error) {
 	if fixture.failFreeAgents {
 		return nil, errors.New("available players are incomplete")
 	}
-	return []domain.FantasyPlayer{{YahooPlayerID: 3, Name: "Three", MLBTeam: "TB", PositionType: "B", EligiblePositions: []domain.Position{domain.PositionOutfield}}}, nil
+	result := []domain.FantasyPlayer{{YahooPlayerID: 3, Name: "Three", MLBTeam: "TB", PositionType: "B", EligiblePositions: []domain.Position{domain.PositionOutfield}}}
+	if progress != nil {
+		progress(len(result))
+	}
+	return result, nil
 }
 
 func (fixture syncYahooFixture) Scoreboard(league string, week *int) ([]domain.Matchup, error) {
@@ -65,6 +79,41 @@ func (fixture syncYahooFixture) Scoreboard(league string, week *int) ([]domain.M
 }
 
 func (fixture syncYahooFixture) RosterWeekStats(team string, week int) (domain.RosterWeekStats, error) {
+	return domain.RosterWeekStats{TeamKey: team, Week: week}, nil
+}
+
+type blockingYahooHistory struct {
+	syncYahooFixture
+	release  <-chan struct{}
+	started  chan<- int
+	failWeek int
+	active   atomic.Int64
+	maximum  atomic.Int64
+	calls    atomic.Int64
+}
+
+func (fixture *blockingYahooHistory) enter() func() {
+	current := fixture.active.Add(1)
+	for current > fixture.maximum.Load() && !fixture.maximum.CompareAndSwap(fixture.maximum.Load(), current) {
+	}
+	return func() { fixture.active.Add(-1) }
+}
+
+func (fixture *blockingYahooHistory) Scoreboard(league string, week *int) ([]domain.Matchup, error) {
+	done := fixture.enter()
+	defer done()
+	fixture.calls.Add(1)
+	fixture.started <- *week
+	if *week == fixture.failWeek {
+		return nil, errors.New("scoreboard unavailable")
+	}
+	<-fixture.release
+	return []domain.Matchup{{Week: *week, Teams: [2]domain.MatchupTeam{{TeamKey: league + ".t.1"}, {TeamKey: league + ".t.2"}}}}, nil
+}
+
+func (fixture *blockingYahooHistory) RosterWeekStats(team string, week int) (domain.RosterWeekStats, error) {
+	done := fixture.enter()
+	defer done()
 	return domain.RosterWeekStats{TeamKey: team, Week: week}, nil
 }
 
@@ -152,6 +201,213 @@ func TestSyncYahooFailureRetainsPriorSnapshotAndConfiguration(t *testing.T) {
 	status, err := store.InspectStatusAt(database.Path(), "mlb.l.1")
 	if err != nil || status.LastRunStatus == nil || *status.LastRunStatus != "failed" || status.ProviderFailureCount != 1 || status.ProviderLastError == nil {
 		t.Fatalf("status=%#v err=%v", status, err)
+	}
+}
+
+func TestYahooSyncProgressRewritesOneTerminalRowAndLeavesRedirectedOutputPlain(t *testing.T) {
+	database, err := store.OpenAt(filepath.Join(t.TempDir(), "progress.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	action := func(service *SyncService) func(*store.Store) (SyncStepResult, error) {
+		return func(*store.Store) (SyncStepResult, error) {
+			service.reportYahooPlayers(128)
+			service.reportYahooPlayers(2552)
+			service.reportYahooMatchups(0, 2)
+			service.reportYahooMatchups(1, 2)
+			service.reportYahooMatchups(2, 2)
+			return SyncStepResult{Count: 2552}, nil
+		}
+	}
+
+	var terminalOutput syncFlushBuffer
+	terminalService := &SyncService{Store: database, Output: &terminalOutput, OutputTerminal: true, Origin: store.OriginManual}
+	outcome := terminalService.runSyncItem("yahoo_public", "fantasy", "terminal", action(terminalService))
+	if !outcome.succeeded {
+		t.Fatalf("outcome=%#v", outcome)
+	}
+	raw := terminalOutput.String()
+	for _, value := range []string{"fetching (128)", "fetching (2552)", "matchups 0/2", "matchups 1/2", "matchups 2/2"} {
+		if !strings.Contains(raw, value) {
+			t.Fatalf("terminal progress lacks %q: %q", value, raw)
+		}
+	}
+	if strings.Count(raw, "\n") != 1 {
+		t.Fatalf("terminal progress emitted intermediate newlines: %q", raw)
+	}
+	parts := strings.Split(raw, terminalLineReset)
+	if got := parts[len(parts)-1]; got != "==> yahoo_public fantasy: fetching -> success (2552)\n" {
+		t.Fatalf("final terminal row=%q", got)
+	}
+
+	var redirected syncFlushBuffer
+	redirectedService := &SyncService{Store: database, Output: &redirected, Origin: store.OriginManual}
+	outcome = redirectedService.runSyncItem("yahoo_public", "fantasy", "redirected", action(redirectedService))
+	if !outcome.succeeded {
+		t.Fatalf("redirected outcome=%#v", outcome)
+	}
+	if got := redirected.String(); got != "==> yahoo_public fantasy: fetching -> success (2552)\n" || strings.Contains(got, "\r") || strings.Contains(got, "\x1b") {
+		t.Fatalf("redirected output=%q", got)
+	}
+}
+
+func TestYahooTerminalFinalDispositionsAreCompleteAndIgnoreLateProgress(t *testing.T) {
+	tests := []struct {
+		name    string
+		outcome syncOutcome
+		want    string
+	}{
+		{name: "success", outcome: syncOutcome{source: "yahoo_public", item: "fantasy", succeeded: true, count: 3}, want: " -> success (3)\n"},
+		{name: "fresh", outcome: syncOutcome{source: "yahoo_public", item: "fantasy", succeeded: true, skipped: true}, want: " -> fresh (0)\n"},
+		{name: "degraded", outcome: syncOutcome{source: "yahoo_public", item: "fantasy", succeeded: true, degraded: true, detail: "partial"}, want: " -> degraded: partial\n"},
+		{name: "failure", outcome: syncOutcome{source: "yahoo_public", item: "fantasy", detail: "offline"}, want: " -> failed: offline\n"},
+	}
+	const prefix = "==> yahoo_public fantasy: fetching"
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output syncFlushBuffer
+			_, _ = output.WriteString(prefix)
+			service := &SyncService{Output: &output, OutputTerminal: true, yahooProgress: newSyncProgressLine(&output, true, prefix)}
+			service.reportYahooPlayers(10)
+			service.finishOutcome(test.outcome)
+			beforeLateProgress := output.String()
+			service.reportYahooPlayers(11)
+			service.reportYahooMatchups(1, 1)
+			if output.String() != beforeLateProgress {
+				t.Fatalf("late progress changed output: %q", output.String())
+			}
+			parts := strings.Split(output.String(), terminalLineReset)
+			if got := parts[len(parts)-1]; got != prefix+test.want {
+				t.Fatalf("final disposition=%q want=%q", got, prefix+test.want)
+			}
+		})
+	}
+}
+
+func TestYahooInteractiveSelectionSuspendsAndRedrawsTerminalProgress(t *testing.T) {
+	root := t.TempDir()
+	database, err := store.OpenAt(filepath.Join(root, "interactive.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var output, prompt syncFlushBuffer
+	service := SyncService{
+		Store: database, Yahoo: syncYahooFixture{}, ConfigPath: filepath.Join(root, "config.json"), RuntimeDirectory: filepath.Join(root, "runtime"),
+		Output: &output, Prompt: &prompt, Input: strings.NewReader("2\n"), InputTerminal: true, OutputTerminal: true, Origin: store.OriginManual,
+	}
+	if _, err := service.Run("mlb.l.1", ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt.String(), "Select your primary team:") || !strings.Contains(prompt.String(), "Choice:") {
+		t.Fatalf("prompt=%q", prompt.String())
+	}
+	if strings.Count(output.String(), terminalLineReset) < 4 {
+		t.Fatalf("progress was not suspended and redrawn: %q", output.String())
+	}
+	parts := strings.Split(output.String(), terminalLineReset)
+	if got := parts[len(parts)-1]; got != "==> yahoo_public fantasy: fetching -> success (3)\n" {
+		t.Fatalf("final terminal row=%q", got)
+	}
+	settings, err := config.ReadAt(filepath.Join(root, "config.json"))
+	if err != nil || settings.CurrentTeamKey != "mlb.l.1.t.2" {
+		t.Fatalf("settings=%#v err=%v", settings, err)
+	}
+}
+
+func TestYahooMatchupHistoryBoundsConcurrencySerializesProgressAndOrdersWeeks(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan int, 8)
+	source := &blockingYahooHistory{release: release, started: started}
+	week := 8
+	type historyResult struct {
+		history []matchupHistory
+		err     error
+	}
+	result := make(chan historyResult, 1)
+	writer := &guardedSyncWriter{}
+	var progressActive, progressMaximum atomic.Int64
+	var completedCounts []int
+	go func() {
+		history, err := acquireMatchupHistory(source, "mlb.l.1", "mlb.l.1.t.1", &week, func(completed, total int) {
+			current := progressActive.Add(1)
+			for current > progressMaximum.Load() && !progressMaximum.CompareAndSwap(progressMaximum.Load(), current) {
+			}
+			_, _ = fmt.Fprintf(writer, "%d/%d ", completed, total)
+			completedCounts = append(completedCounts, completed)
+			progressActive.Add(-1)
+		})
+		result <- historyResult{history: history, err: err}
+	}()
+	for range yahooSyncParallelLimit {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("matchup workers did not reach bounded concurrency")
+		}
+	}
+	select {
+	case <-started:
+		t.Fatal("more than four matchup weeks started before one completed")
+	default:
+	}
+	close(release)
+	var got historyResult
+	select {
+	case got = <-result:
+	case <-time.After(2 * time.Second):
+		t.Fatal("matchup workers did not join")
+	}
+	if got.err != nil || len(got.history) != week {
+		t.Fatalf("history=%#v err=%v", got.history, got.err)
+	}
+	for index, entry := range got.history {
+		if entry.week != index+1 || len(entry.rosters) != 2 || entry.rosters[0].Week != index+1 {
+			t.Fatalf("history order=%#v", got.history)
+		}
+	}
+	if source.maximum.Load() != yahooSyncParallelLimit || source.active.Load() != 0 || progressMaximum.Load() != 1 || progressActive.Load() != 0 || writer.maximum.Load() != 1 || writer.active.Load() != 0 {
+		t.Fatalf("request concurrency=%d active=%d progress concurrency=%d writer concurrency=%d", source.maximum.Load(), source.active.Load(), progressMaximum.Load(), writer.maximum.Load())
+	}
+	if !reflect.DeepEqual(completedCounts, []int{1, 2, 3, 4, 5, 6, 7, 8}) {
+		t.Fatalf("completed progress=%v", completedCounts)
+	}
+}
+
+func TestYahooMatchupHistoryStopsSchedulingAndProgressAfterFailure(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan int, 10)
+	source := &blockingYahooHistory{release: release, started: started, failWeek: 1}
+	week := 10
+	result := make(chan error, 1)
+	var progressCalls atomic.Int64
+	go func() {
+		history, err := acquireMatchupHistory(source, "mlb.l.1", "mlb.l.1.t.1", &week, func(int, int) { progressCalls.Add(1) })
+		if len(history) != 0 {
+			result <- fmt.Errorf("partial matchup history returned: %#v", history)
+			return
+		}
+		result <- err
+	}()
+	for range yahooSyncParallelLimit {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("initial matchup workers did not start")
+		}
+	}
+	close(release)
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "scoreboard unavailable") {
+			t.Fatalf("error=%v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("failed matchup workers did not join")
+	}
+	if source.calls.Load() >= int64(week) || source.active.Load() != 0 || progressCalls.Load() != 0 {
+		t.Fatalf("calls=%d active=%d progress=%d", source.calls.Load(), source.active.Load(), progressCalls.Load())
 	}
 }
 
@@ -346,7 +602,7 @@ func TestProductDocumentationMatchesTheExecutablePublicSurface(t *testing.T) {
 	}
 
 	architecture := read("arch.md")
-	for _, evidence := range []string{"public endpoints only", "schema version 6", "Credentials", "roster mutation", "background", "fantasy matchup", "database-operation lock", "skout.db-wal", "Every advertised command now has an executable Go path", "parity review", "already archived"} {
+	for _, evidence := range []string{"public endpoints only", "schema version 6", "Credentials", "roster mutation", "background", "fantasy matchup", "database-operation lock", "skout.db-wal", "Every advertised command now has an executable Go path", "at most four requests in flight", "serialized collector", "already archived", "not a runtime or release dependency"} {
 		if !strings.Contains(architecture, evidence) {
 			t.Fatalf("architecture lacks boundary evidence %q", evidence)
 		}
@@ -400,4 +656,21 @@ type syncFlushBuffer struct {
 func (buffer *syncFlushBuffer) Flush() error {
 	buffer.flushes++
 	return nil
+}
+
+type guardedSyncWriter struct {
+	mu      sync.Mutex
+	buffer  bytes.Buffer
+	active  atomic.Int64
+	maximum atomic.Int64
+}
+
+func (writer *guardedSyncWriter) Write(payload []byte) (int, error) {
+	current := writer.active.Add(1)
+	for current > writer.maximum.Load() && !writer.maximum.CompareAndSwap(writer.maximum.Load(), current) {
+	}
+	defer writer.active.Add(-1)
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	return writer.buffer.Write(payload)
 }

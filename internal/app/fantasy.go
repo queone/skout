@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -894,7 +895,7 @@ func nextProjectionLine(player domain.StoredFantasyPlayer, projection store.Proj
 			window = 10
 		}
 		projected := analysis.PitcherWindow{IP: projection.IP, Wins: projection.W, Saves: projection.SV, Strikeouts: projection.K, ERA: projection.ERA, WHIP: projection.WHIP}
-		next := analysis.NextPitcherWindow(&projected, recentPitcherWindow(logs, projected), window)
+		next := analysis.NextPitcherWindow(&projected, recentPitcherWindow(logs, projected, window), window)
 		return fmt.Sprintf("NEXT%02dIP  IP %4.1f  QS %3.0f  W %3.0f  SV %3.0f  K %4.0f  ERA %5.2f  WHIP %5.2f", int(window), next.IP, next.QualityStarts, next.Wins, next.Saves, next.Strikeouts, next.ERA, next.WHIP)
 	}
 	projected := analysis.HitterWindow{PA: projection.PA, Runs: projection.R, HomeRuns: projection.HR, RBI: projection.RBI, StolenBases: projection.SB, Average: projection.AVG, OBP: projection.OBP, OPS: projection.OBP + projection.SLG}
@@ -905,7 +906,8 @@ func nextProjectionLine(player domain.StoredFantasyPlayer, projection store.Proj
 func recentHitterWindow(logs []domain.PlayerGameLog, projection analysis.HitterWindow) *analysis.HitterWindow {
 	window := analysis.HitterWindow{Average: projection.Average, OBP: projection.OBP, OPS: projection.OPS}
 	var hits, atBats, obpTotal, obpWeight, opsTotal, opsWeight float64
-	for _, log := range logs {
+	for _, log := range slices.Backward(logs) {
+
 		pa, ok := fantasyLogNumber(log.Line, "PA")
 		if !ok || pa <= 0 {
 			continue
@@ -923,6 +925,9 @@ func recentHitterWindow(logs []domain.PlayerGameLog, projection analysis.HitterW
 		if value, found := fantasyLogNumber(log.Line, "OPS"); found {
 			opsTotal, opsWeight = opsTotal+value*pa, opsWeight+pa
 		}
+		if window.PA >= 20 {
+			break
+		}
 	}
 	if window.PA == 0 {
 		return nil
@@ -939,10 +944,11 @@ func recentHitterWindow(logs []domain.PlayerGameLog, projection analysis.HitterW
 	return &window
 }
 
-func recentPitcherWindow(logs []domain.PlayerGameLog, projection analysis.PitcherWindow) *analysis.PitcherWindow {
+func recentPitcherWindow(logs []domain.PlayerGameLog, projection analysis.PitcherWindow, targetInnings float64) *analysis.PitcherWindow {
 	window := analysis.PitcherWindow{ERA: projection.ERA, WHIP: projection.WHIP}
 	var eraTotal, eraWeight, whipTotal, whipWeight float64
-	for _, log := range logs {
+	for _, log := range slices.Backward(logs) {
+
 		value, ok := fantasyLogText(log.Line, "IP")
 		if !ok {
 			continue
@@ -961,6 +967,9 @@ func recentPitcherWindow(logs []domain.PlayerGameLog, projection analysis.Pitche
 		}
 		if rate, found := fantasyLogNumber(log.Line, "WHIP"); found {
 			whipTotal, whipWeight = whipTotal+rate*innings, whipWeight+innings
+		}
+		if window.IP >= targetInnings {
+			break
 		}
 	}
 	if window.IP == 0 {

@@ -76,12 +76,15 @@ type LeagueRosters struct {
 	Slots   []domain.FantasyRosterSlot `json:"slots"`
 }
 
+// YahooPlayerProgress receives one cumulative unique-player count.
+type YahooPlayerProgress func(count int)
+
 // YahooFantasySource is the public Yahoo boundary consumed by sync.
 type YahooFantasySource interface {
 	LeagueSettings(leagueKey string) (LeagueSettings, error)
 	Standings(leagueKey string) ([]domain.FantasyTeam, error)
-	LeagueRosters(leagueKey string, teamKeys []string) (LeagueRosters, error)
-	FreeAgents(leagueKey string) ([]domain.FantasyPlayer, error)
+	LeagueRosters(leagueKey string, teamKeys []string, progress YahooPlayerProgress) (LeagueRosters, error)
+	FreeAgents(leagueKey string, progress YahooPlayerProgress) ([]domain.FantasyPlayer, error)
 	Scoreboard(leagueKey string, week *int) ([]domain.Matchup, error)
 	RosterWeekStats(teamKey string, week int) (domain.RosterWeekStats, error)
 }

@@ -34,6 +34,8 @@ Each provider item records attempts, successful freshness, degraded detail, or b
 
 Yahoo access uses public endpoints only. The runtime sends no authorization header, OAuth material, cookies, browser state, or credentials, and it performs no roster mutation. Daily Yahoo roster acquisition and short-lived RotoWire lineup acquisition run only for the matching read-only command and are not added to foreground synchronization.
 
+Yahoo synchronization acquires independent team rosters and matchup weeks with at most four requests in flight. One serialized collector restores team and week order, owns progress updates, stops scheduling after the first observed failure, and joins every launched worker before persistence or outcome reporting. Free-agent pages remain sequential and bounded.
+
 ## Components
 
 - `cmd/skout`: process entrypoint, version declaration, and production dependency wiring.
@@ -62,7 +64,7 @@ Fantasy roster and pool reads join role-distinct MLB identities to current and p
 
 ## Boundaries
 
-Credentials, Yahoo roster mutation, background scheduling, and long-running services remain outside the runtime boundary. Every advertised command now has an executable Go path. The Rust reference repository is already archived. Only the final cross-repository parity review remains outside this repository's executable migration work.
+Credentials, Yahoo roster mutation, background scheduling, and long-running services remain outside the runtime boundary. Every advertised command now has an executable Go path. The Rust reference repository is already archived and is not a runtime or release dependency.
 
 The application remains on SQLite schema version 6 and introduces no schema version 7 behavior.
 

@@ -84,7 +84,7 @@ func SyncProduction(options SyncOptions) (string, error) {
 		ConfigPath: configPath, RuntimeDirectory: runtimeDirectory,
 		CanonicalLeague: providers.CanonicalPublicLeagueKey,
 		Input:           options.Input, Prompt: options.Prompt, Output: output,
-		InputTerminal: options.InputTerminal, Origin: store.OriginManual,
+		InputTerminal: options.InputTerminal, OutputTerminal: options.OutputTerminal, Origin: store.OriginManual,
 		lockHeld: true, startReported: true,
 	}
 	if service.Input == nil {

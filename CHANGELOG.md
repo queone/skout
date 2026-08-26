@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.7.0 | AC11 speed up Yahoo sync and restore fantasy advice parity |
 | 0.6.1 | AC10 harden config privacy and restore terminal colors |
 | 0.6.0 | AC9 deliver confirmed local database reset |
 | 0.5.0 | AC8 deliver read-only fantasy views |

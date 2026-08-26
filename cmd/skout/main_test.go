@@ -111,7 +111,7 @@ func TestDocumentationDescribesCompleteExecutableSurfaceAndRemainingPlan(t *test
 			t.Errorf("README missing %q", command)
 		}
 	}
-	if !strings.Contains(architecture, "Rust reference repository is already archived") || !strings.Contains(architecture, "Only the final cross-repository parity review remains") {
+	if !strings.Contains(architecture, "Rust reference repository is already archived") || !strings.Contains(architecture, "not a runtime or release dependency") || strings.Contains(architecture, "Only the final cross-repository parity review remains") {
 		t.Errorf("architecture migration boundary is inaccurate")
 	}
 	if strings.Count(plan, "## ") != 2 || !strings.Contains(plan, "## Product Direction") || !strings.Contains(plan, "## Ideas To Explore") || strings.Contains(plan, "IE1") || strings.Contains(plan, "IE2") || strings.Contains(plan, "IE3") || strings.Contains(plan, "IE4") {

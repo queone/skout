@@ -229,3 +229,40 @@ func TestFantasySortAliasesAndRecentProjectionBlend(t *testing.T) {
 		t.Fatalf("recent blend line=%q", line)
 	}
 }
+
+func TestRecentProjectionWindowsIgnoreGamesOlderThanTheirThreshold(t *testing.T) {
+	hitter := domain.StoredFantasyPlayer{Role: "B"}
+	hitterProjection := store.ProjectionRow{PA: 100, R: 10, AVG: .250, OBP: .300, SLG: .400}
+	hitterRecent := []domain.PlayerGameLog{
+		{Date: "2026-08-24", Line: "PA 10 AB 8 H 2 R 1 HR 0 RBI 1 SB 0 AVG .250 OBP .300 OPS .700"},
+		{Date: "2026-08-25", Line: "PA 10 AB 8 H 2 R 1 HR 0 RBI 1 SB 0 AVG .250 OBP .300 OPS .700"},
+	}
+	hitterWithOldOutlier := append([]domain.PlayerGameLog{{Date: "2026-08-01", Line: "PA 100 AB 80 H 80 R 99 HR 50 RBI 99 SB 20 AVG 1.000 OBP 1.000 OPS 4.000"}}, hitterRecent...)
+	hitterLine := nextProjectionLine(hitter, hitterProjection, hitterRecent)
+	if got := nextProjectionLine(hitter, hitterProjection, hitterWithOldOutlier); got != hitterLine || !strings.HasPrefix(got, "NEXT20PA") {
+		t.Fatalf("hitter line with old outlier=%q want=%q", got, hitterLine)
+	}
+
+	starter := domain.StoredFantasyPlayer{Role: "P", Positions: "SP"}
+	pitcherProjection := store.ProjectionRow{IP: 100, W: 10, K: 100, ERA: 3, WHIP: 1.1}
+	starterRecent := []domain.PlayerGameLog{
+		{Date: "2026-08-18", Line: "IP 5.0 QS 0 W 0 SV 0 K 5 ERA 3.00 WHIP 1.00"},
+		{Date: "2026-08-25", Line: "IP 6.0 QS 1 W 1 SV 0 K 6 ERA 3.00 WHIP 1.00"},
+	}
+	starterWithOldOutlier := append([]domain.PlayerGameLog{{Date: "2026-08-01", Line: "IP 9.0 QS 1 W 1 SV 0 K 99 ERA 99.00 WHIP 9.00"}}, starterRecent...)
+	starterLine := nextProjectionLine(starter, pitcherProjection, starterRecent)
+	if got := nextProjectionLine(starter, pitcherProjection, starterWithOldOutlier); got != starterLine || !strings.HasPrefix(got, "NEXT10IP") {
+		t.Fatalf("starter line with old outlier=%q want=%q", got, starterLine)
+	}
+
+	reliever := domain.StoredFantasyPlayer{Role: "P", Positions: "RP"}
+	relieverRecent := []domain.PlayerGameLog{
+		{Date: "2026-08-23", Line: "IP 1.1 QS 0 W 0 SV 1 K 2 ERA 0.00 WHIP .75"},
+		{Date: "2026-08-25", Line: "IP 2.0 QS 0 W 1 SV 0 K 3 ERA 0.00 WHIP .50"},
+	}
+	relieverWithOldOutlier := append([]domain.PlayerGameLog{{Date: "2026-08-01", Line: "IP 4.0 QS 0 W 0 SV 0 K 99 ERA 99.00 WHIP 9.00"}}, relieverRecent...)
+	relieverLine := nextProjectionLine(reliever, pitcherProjection, relieverRecent)
+	if got := nextProjectionLine(reliever, pitcherProjection, relieverWithOldOutlier); got != relieverLine || !strings.HasPrefix(got, "NEXT03IP") {
+		t.Fatalf("reliever line with old outlier=%q want=%q", got, relieverLine)
+	}
+}

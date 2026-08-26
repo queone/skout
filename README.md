@@ -24,6 +24,8 @@ skout sync -l 170874 -T Toros
 
 The league may be a numeric ID or a full Yahoo league key. The team may be a team key or name. In an interactive terminal, `skout sync` prompts when a required selection is missing and saves the result for later commands.
 
+While Yahoo's longer refresh runs in an interactive terminal, `skout sync` updates acquired-player and matchup-history counts in place. Redirected output remains one line per provider outcome.
+
 ```bash
 skout st       # show local provider and snapshot status
 skout sync     # refresh the saved league and team

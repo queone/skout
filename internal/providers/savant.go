@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bytes"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -141,6 +142,7 @@ func ParseSavantCSV(payload []byte, season int64, group string) ([]SavantRow, er
 	if season <= 0 || group != "batting" && group != "pitching" {
 		return nil, invalid(operation, "positive season and batting or pitching stat group are required")
 	}
+	payload = bytes.TrimPrefix(payload, []byte{0xef, 0xbb, 0xbf})
 	if !utf8.Valid(payload) {
 		return nil, invalid(operation, "response is not UTF-8")
 	}
