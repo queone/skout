@@ -348,6 +348,7 @@ Note: the Director flags scope concerns in chat during this window.
 
 - Run this checklist after the Director resolves all review questions.
 - Confirm each settled decision landed verbatim in the AC.
+- Treat a Director-resolved routing decision recorded in chat for an immutable emitted AC as satisfying the verbatim-in-AC check.
 - Confirm ATs match settled wording.
 - Confirm the AC title and Summary lead with the concrete outcome in plain language.
 - Confirm every new or rewritten instruction in AGENTS.md follows Instruction Style.
@@ -361,9 +362,11 @@ Note: the Director flags scope concerns in chat during this window.
 - Treat every Director-resolved routing target as effective implementation scope, even when it is absent from `## In Scope`.
 - Treat each explicitly named migration destination as effective implementation scope with its routed source.
 - Treat `govna/preserve.txt` as effective implementation scope only when a resolved routing outcome requires creating or changing it.
+- Treat `CHANGELOG.md` as effective implementation scope only when a resolved legacy-phrase outcome requires removing an exact phrase.
 - Require no second Director authorization for an effective-scope preserve-registry change.
 - Require the Director to name every migration destination.
 - Apply each resolved routing action while leaving the emitted AC stub unchanged.
+- Install each missing canon-backed replacement before retired-source routing.
 - Render canon into a scratch directory using `govna render <scratch>`.
 - Inspect changes per `## In Scope` item by running `diff -ru <scratch>/<path> <path>`.
 - Add each resolved preserve target's exact path to `govna/preserve.txt`.
@@ -373,7 +376,7 @@ Note: the Director flags scope concerns in chat during this window.
 - Preserve unrelated preserve-registry entries.
 - Leave the registry absent or unchanged when its state already satisfies every resolved outcome.
 - Treat exact legacy preserve phrases in the Unreleased CHANGELOG Summary as migration evidence only.
-- Remove each exact legacy phrase only after verifying its resolved registry state.
+- Remove each exact legacy phrase only after verifying its resolved target and registry state.
 - Preserve unrelated CHANGELOG Summary text and historical rows.
 - Ensure the parent directory exists for each `## In Scope` item: `mkdir -p "$(dirname <path>)"`.
 - Categorize each `## In Scope` item as pure-canon or mixed-content before applying.

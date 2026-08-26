@@ -87,17 +87,21 @@ Require a final newline. Keep entries nonempty, slash-normalized, unique, and by
 
 Add an exact path for a resolved preserve outcome. Remove an exact path for a resolved sync, delete, or canon-backed migration outcome. Preserve unrelated entries. Leave the registry absent or unchanged when its state already satisfies every resolved outcome. Verify registry changes before installing the canon baseline.
 
+- Classify an existing target-only path named in the preserve registry as `preserve`.
+- Keep that preserved target-only path visible in audit and JSON results.
+- Omit another routing question for that preserved target-only path.
+
 Exclude `govna/preserve.txt` from rendered canon, canon baselines, ordinary audit drift, name-referenced target-only evidence, and ordinary rm target-only content. Include it in rm only as the final control-state deletion after applying all registered preserve decisions.
 
-Treat only exact legacy preserve phrases in the Unreleased CHANGELOG Summary as migration evidence: `preserve <path>`, `do not sync <path>`, `intentional divergence: <path>`, and `<path>: keep local`. Route each phrase to an explicit convert-or-remove decision. Remove it only after verifying the resolved registry state. Preserve unrelated Summary text and historical rows. Ignore matching prose in historical CHANGELOG rows, emitted ACs, and every other governance document.
+Treat only exact legacy preserve phrases in the Unreleased CHANGELOG Summary as migration evidence: `preserve <path>`, `do not sync <path>`, `intentional divergence: <path>`, and `<path>: keep local`. Route each phrase under `### Routing capabilities`. Remove it only after verifying its required target and registry state. Preserve unrelated Summary text and historical rows. Ignore matching prose in historical CHANGELOG rows, emitted ACs, and every other governance document.
 
-A registry entry on a missing file suppresses `missing-in-target` to a suppressed `match`; an entry on a divergent file routes it to `preserve` instead of `ambiguity` or `clear-sync`. Exceptions are an eligible stale-version-only `govna/metadata.txt`, whose canon-owned `canon_version` cannot be pinned, and a boundary-less CODE `govna/build-release.md`, which remains a reviewed migration.
+A registry entry on a missing current-canon file suppresses `missing-in-target` to a suppressed `match`; an entry on a divergent current-canon file or an existing target-only file routes it to `preserve` instead of a review classification. Exceptions are an eligible stale-version-only `govna/metadata.txt`, whose canon-owned `canon_version` cannot be pinned, and a boundary-less CODE `govna/build-release.md`, which remains a reviewed migration.
 
 ## Target-only detection
 
-Audit classifies an existing target as `target-has-no-canon` when the path is absent from current flavor canon and at least one bounded evidence source identifies it: the valid prior baseline, the pre-baseline retired-path tombstone registry, other-flavor canon, or a path reference from an already-divergent governed file. Evidence is merged by target path with tombstone replacement metadata retained, then emitted in deterministic path order.
+Audit classifies an existing target as `target-has-no-canon` when the path is absent from current flavor canon, the preserve registry does not name it, and at least one bounded evidence source identifies it: the valid prior baseline, the pre-baseline retired-path tombstone registry, other-flavor canon, or a path reference from an already-divergent governed file. Evidence is merged by target path with tombstone replacement metadata retained, then emitted in deterministic path order.
 
-The tombstone registry bridges removals that predate baseline adoption. It currently records `govna/drift-scan.md` as replaced by `govna/audit.md`. Audit recommends deleting the retired path only when the replacement is present; otherwise it recommends restoring or migrating the replacement first.
+The tombstone registry bridges removals that predate baseline adoption. It currently records `govna/drift-scan.md` as replaced by `govna/audit.md`. A missing current-canon replacement already appears as a direct update. The emitted AC names and installs that replacement before routing the retired source to preserve, explicitly named migration, or delete. It never offers restore as a separate routing outcome.
 
 Audit does not flag arbitrary consumer-owned governance documents that have none of these evidence sources. Audit never deletes or migrates a target file itself.
 
@@ -120,7 +124,7 @@ Audit fails before emission for malformed fields, duplicate or unsorted paths, i
 
 ## Canon-coherence precondition
 
-Before comparing anything against the target, audit checks that govna's own rendered canon is internally coherent — a registry-driven, canon-only precondition (`coherence_rules()`) that would catch cases like an overlay template drifting out of sync with its authority doc. The registry ships empty today. If a future rule fails, audit skips target comparison and emits a coherence-failure report.
+Before comparing anything against the target, audit checks that govna's own rendered canon is internally coherent — a registry-driven, canon-only precondition that catches cases like an overlay template drifting out of sync with its authority doc. The registry requires `govna/roles.md` to reference the one release document present in the selected flavor and reject the absent opposite-flavor path. If a rule fails, audit skips target comparison and emits a coherence-failure report.
 
 ## Emitted AC stub
 
@@ -135,14 +139,16 @@ The stub carries an edit-detection marker (SHA-256 body hash). Re-running audit 
 
 An audit with no updates or Director choices exits successfully and prints `No Govna updates or Director choices found`, followed by a plain result tally and `No AC was written.` It performs no AC-number allocation, stub inspection, directory creation, or file write. It never deletes, overwrites, or validates an existing audit stub. With `--json`, the complete report remains available and `emitted` is `null`; no additional prose is written.
 
-Effective implementation scope is the narrow rule that permits a directly affected supporting file to change when the Director already settled its outcome. Every Director-resolved routing target enters that scope while the generated AC remains unchanged. Explicitly named migration destinations also enter it. `govna/preserve.txt` enters only when a resolved outcome requires creating or changing it, without a second Director authorization.
+Effective implementation scope is the narrow rule that permits a directly affected supporting file to change when the Director already settled its outcome. Every Director-resolved routing target enters that scope while the generated AC remains unchanged. Explicitly named migration destinations also enter it. `govna/preserve.txt` enters only when a resolved outcome requires creating or changing it. `CHANGELOG.md` enters only when a resolved legacy-phrase outcome requires removing an exact phrase. Neither supporting-file adjustment requires a second Director authorization.
 
 ### Emitted AC instruction and phase shape
 
-- Place the count paragraph first under `## Summary`.
-- Start the count paragraph with `Govna found`.
+- Name each emitted adoption AC `# AC<N> Adopt Govna Governance Files v<CANON_VERSION>`.
+- Place the repository paragraph first under `## Summary`.
 - Start the repository paragraph with `This AC updates`.
 - Follow it with `The result label (classification)`.
+- Place the count paragraph after the repository paragraph.
+- Start the count paragraph with `Govna found`.
 - Keep the count and Summary paragraphs descriptive.
 - Confirm each file selected for update exists in the selected CODE render.
 - Place that CODE-render check and all routing procedure under `### Adoption Instructions`.
@@ -152,6 +158,28 @@ Effective implementation scope is the narrow rule that permits a directly affect
 - End every numbered routing entry with `?`.
 - Keep shared implementation procedure out of routing questions.
 - End every emitted adoption AC with exact status `` `PENDING` — audit emission; awaiting explicit Director Audit.``
+
+### Routing capabilities
+
+- Offer only these outcomes for a canon-backed ambiguity: sync, preserve, explicitly named migration, delete.
+- Offer only these outcomes for an ordinary `target-has-no-canon` item: preserve, explicitly named migration, delete.
+- Require the Director to name every migration destination in the routing response.
+- Install an exact current-canon replacement before retired-source routing.
+- Offer only these outcomes for that retired source: preserve, explicitly named migration, delete.
+- Omit restore as a routing outcome.
+- Define marker-only evidence as an exact Unreleased CHANGELOG preserve phrase whose referenced path has no independent file action.
+- Offer conversion to `govna/preserve.txt` or exact-phrase removal for marker-only evidence.
+- Add the referenced path to `govna/preserve.txt` for a conversion choice.
+- Leave the referenced target unchanged during marker-only conversion.
+- Remove the converted phrase after registry verification.
+- Remove only the exact phrase for a marker-only removal choice.
+- Preserve the referenced target during marker-only phrase removal.
+- Preserve unrelated registry state during marker-only phrase removal.
+- Apply each independently actionable file's capability-specific route before legacy-phrase cleanup.
+- Treat a preserve choice on that file as conversion of its legacy phrase.
+- Verify the result of every resolved sync, migration, or deletion before legacy-phrase cleanup.
+- Remove the exact legacy phrase after that verification.
+- Preserve unrelated CHANGELOG Summary text and historical rows.
 
 ### Mixed-content sync verification
 
@@ -164,6 +192,30 @@ Effective implementation scope is the narrow rule that permits a directly affect
 - Keep rendered-canon comparison scoped to the canon zone above the boundary.
 - Avoid comparing the repository-owned tail with rendered defaults.
 - Keep the protected-region digest out of classification, baseline scope, and JSON output.
+
+### Conditional routing verification
+
+- Emit a conditional rendered-region check for each offered sync outcome.
+- Emit a conditional preserve-registry exclusion check for each offered sync outcome.
+- Emit a conditional target-presence check for each offered preserve outcome.
+- Emit a conditional preserve-registry inclusion check for each offered preserve outcome.
+- Emit a conditional target-absence check for each offered delete outcome.
+- Emit a conditional preserve-registry exclusion check for each offered delete outcome.
+- Emit a conditional named-destination check for each offered migration outcome.
+- Emit a conditional source check for each offered migration outcome.
+- Emit a conditional canon-backed destination check for each offered migration outcome.
+- Emit a conditional repository-owned destination check for each offered migration outcome.
+- Emit a conditional preserve-registry check for each canon-backed migration outcome.
+- Emit a replacement-before-retired-source check for each replacement-missing route.
+- Emit a referenced-target state check for each marker-only route.
+- Emit a conversion registry check for each marker-only route.
+- Emit a removal registry check for each marker-only route.
+- Emit an exact-phrase absence check for each legacy-phrase route.
+- Emit a target-before-phrase check for each independently actionable legacy-phrase route.
+- Emit an unrelated-Summary preservation check for each legacy-phrase route.
+- Emit an outside-Summary preservation check for each legacy-phrase route.
+- Keep every emitted routing check atomic.
+- Keep emitted AT numbering stable across identical reports.
 
 - Apply repository-check inference when baseline installation or replacement is present.
 - Infer the repository check only from bounded target governance evidence.
@@ -193,7 +245,7 @@ Effective implementation scope is the narrow rule that permits a directly affect
 
 Note: exact unresolved repository-check question: ``<N>. **Repository check**: Which command should run after the selected file updates, or what repository evidence shows that no command applies?``
 
-Emitted acceptance tests verify updates, required control files, deletion, and preservation according to the Director's choices. The pre-install rendered-file check covers declared update items except `govna/canon-baseline.txt`, review targets selected for update, and migration destinations backed by embedded Govna files. After all selected work, the chosen repository command must succeed, or the `Not applicable` evidence must hold. Only after every other applicable automated AT and routing outcome passes does the baseline get installed and verified separately from the same temporary render as the final step.
+Emitted acceptance tests verify updates, required control files, every offered routing outcome, replacement ordering, legacy-phrase cleanup, and preservation according to the Director's choices. The pre-install rendered-file check covers declared update items except `govna/canon-baseline.txt`, review targets selected for update, and migration destinations backed by embedded Govna files. After all selected work, the chosen repository command must succeed, or the `Not applicable` evidence must hold. Only after every other applicable automated AT and routing outcome passes does the baseline get installed and verified separately from the same temporary render as the final step.
 
 Every audit-emitted AT carries exactly one source axis and one explicit timing axis. Current audit ATs use `[Automated] [Pre-release gate]` or `[Manual] [Pre-release gate]`; none defer verification until after release.
 

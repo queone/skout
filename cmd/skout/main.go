@@ -9,7 +9,7 @@ import (
 	"github.com/queone/skout/internal/terminal"
 )
 
-const programVersion = "0.7.1"
+const programVersion = "0.7.2"
 
 func main() {
 	context := cli.Context{

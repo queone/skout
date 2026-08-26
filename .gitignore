@@ -1,3 +1,21 @@
+# Build artifacts
+*.out
+*.test
+*.exe
+
+# Coverage
+build-cover-*.out
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
 
 # ---- Go ----
 # Go-specific additions appended by govna render-canon when stack:Go is detected.
