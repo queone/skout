@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.7.1 | AC12 adopt Govna v0.37.0 governance |
 | 0.7.0 | AC11 speed up Yahoo sync and restore fantasy advice parity |
 | 0.6.1 | AC10 harden config privacy and restore terminal colors |
 | 0.6.0 | AC9 deliver confirmed local database reset |

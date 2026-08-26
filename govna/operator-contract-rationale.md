@@ -2,6 +2,12 @@
 
 This explanatory document records why the Operator contract exists. `AGENTS.md` alone defines operational rules and wins every conflict.
 
+## Contract Purpose
+
+Govna exists to make programming and publishing ceremonies—the recurring CODE and DOC checkpoints around intent, authorization, scope, review, implementation or editing, verification, and release—more effective and efficient. Reusable context reduces process reconstruction, ambiguity, duplicated decisions, and avoidable rework across phases and sessions.
+
+Efficiency does not weaken authorization, review, verification, or release gates. Govna keeps decision-bearing choices with the Director and makes only settled, deterministic mechanics reusable.
+
 ## Session-Entry Purpose
 
 Session Entry tells a general-purpose agent that constrained repository rules apply before substantive work. It initializes contract identity, substantive-action scope, gates, precedence, and an observable checkpoint without restating the full contract. Audit catches residual drift.

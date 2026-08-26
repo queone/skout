@@ -2,6 +2,8 @@
 
 This repo uses an acceptance-criteria-first workflow.
 
+The lifecycle makes recurring programming checkpoints and their settled context reusable across phases and sessions. This reduces process reconstruction and avoidable rework without weakening authorization, review, verification, or release gates.
+
 ## AC Workflow
 
 - Follow the lifecycle `Draft → Audit → Refine → Implement → Ratify → Package`.

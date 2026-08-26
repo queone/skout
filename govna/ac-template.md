@@ -4,7 +4,7 @@ Use a kebab-case slug and a `# AC<N> Title` heading that names the concrete outc
 Set `N` to one above the highest AC number in `govna/` or `git log --all --pretty=%B`.
 Count every reference because release-prep deletions do not reset numbering.
 
-The AC is the implementation contract for one approved roadmap item. The full development cycle that wraps around this template lives in `govna/development-cycle.md`. The enforceable rules around when to draft, review, and integrate an AC live in `AGENTS.md`.
+The AC is the implementation contract for one approved roadmap item. An AC records settled intent, scope, and proof once so later review, implementation, and verification can reuse the same context instead of reconstructing it. The full development cycle that wraps around this template lives in `govna/development-cycle.md`. The enforceable rules around when to draft, review, and integrate an AC live in `AGENTS.md`.
 
 # AC<N> Title
 
