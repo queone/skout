@@ -46,6 +46,46 @@ func TestFantasyDisplayGoldensAndSemanticWidths(t *testing.T) {
 	}
 }
 
+func TestFantasyLineupIndicatorsRespectSubduedRosterRows(t *testing.T) {
+	base := sampleFantasyPlayers()[0]
+	activeSlot, benchSlot, injuredSlot := "OF", "BN", "IL"
+	active := base
+	active.Name, active.Slot, active.GameStatus = "Active Hitter", &activeSlot, "7:05p 2 v BOS"
+	active.GameIndicator = domain.GameIndicator{Kind: domain.GameIndicatorBattingOrder, Order: 2}
+	bench := base
+	bench.Name, bench.Slot, bench.GameStatus = "Bench Hitter", &benchSlot, "7:05p ● v BOS"
+	bench.GameIndicator = domain.GameIndicator{Kind: domain.GameIndicatorOutOfLineup}
+	injuredSlotPlayer := base
+	injuredSlotPlayer.Name, injuredSlotPlayer.Slot, injuredSlotPlayer.GameStatus = "IL Slot Hitter", &injuredSlot, "7:05p 3 v BOS"
+	injuredSlotPlayer.GameIndicator = domain.GameIndicator{Kind: domain.GameIndicatorBattingOrder, Order: 3}
+	injuredStatusPlayer := base
+	injuredStatusPlayer.Name, injuredStatusPlayer.Slot, injuredStatusPlayer.Status = "IL Status Hitter", &activeSlot, "IL10 ● v BOS"
+	injuredStatusPlayer.GameIndicator = domain.GameIndicator{Kind: domain.GameIndicatorOutOfLineup}
+	players := []domain.StoredFantasyPlayer{active, bench, injuredSlotPlayer, injuredStatusPlayer}
+
+	plain := RenderFantasyPlayers("Operators", players, terminal.Plain)
+	colored := RenderFantasyPlayers("Operators", players, terminal.Color)
+	for _, want := range []string{
+		"7:05p \x1b[38;5;46m2\x1b[0m v BOS",
+		"7:05p \x1b[38;5;124m●\x1b[38;5;245m v BOS",
+		"7:05p \x1b[38;5;34m3\x1b[38;5;245m v BOS",
+		"IL10 \x1b[38;5;124m●\x1b[38;5;245m v BOS",
+	} {
+		if !strings.Contains(colored, want) {
+			t.Errorf("colored roster missing %q: %q", want, colored)
+		}
+	}
+	plainLines, coloredLines := strings.Split(plain, "\n"), strings.Split(colored, "\n")
+	if len(plainLines) != len(coloredLines) {
+		t.Fatalf("plain lines=%d colored lines=%d", len(plainLines), len(coloredLines))
+	}
+	for index := range plainLines {
+		if terminal.VisibleWidth(plainLines[index]) != terminal.VisibleWidth(coloredLines[index]) {
+			t.Errorf("line %d width differs: plain=%q colored=%q", index, plainLines[index], coloredLines[index])
+		}
+	}
+}
+
 func TestFantasyDetailGoldensMissingValuesAndStaleLabels(t *testing.T) {
 	players := sampleFantasyPlayers()
 	logs := []domain.PlayerGameLog{{Date: "2026-08-24", GameID: 1, Opponent: "@BOS", BattingOrder: 4, Line: "H 2 AB 4 R 1 HR 1 RBI 2 SB 0 AVG .500"}}

@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.6.1 | AC10 harden config privacy and restore terminal colors |
 | 0.6.0 | AC9 deliver confirmed local database reset |
 | 0.5.0 | AC8 deliver read-only fantasy views |
 | 0.4.0 | AC7 deliver public fantasy synchronization |

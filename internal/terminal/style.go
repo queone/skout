@@ -41,6 +41,21 @@ func IsTerminal(file *os.File) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
+// Title styles the root-help title with the established bold bright-white role.
+func Title(value string, mode ColorMode) string {
+	return style(value, "1;38;5;231", mode)
+}
+
+// Subtitle styles the root-help subtitle with the established gray role.
+func Subtitle(value string, mode ColorMode) string {
+	return style(value, "38;5;245", mode)
+}
+
+// Section styles root-help section headings with the established white role.
+func Section(value string, mode ColorMode) string {
+	return style(value, "38;5;255", mode)
+}
+
 // Usage styles a help usage label with the governed bold-white role.
 func Usage(value string, mode ColorMode) string {
 	return style(value, "1;38;5;231", mode)
@@ -79,6 +94,26 @@ func Warning(value string, mode ColorMode) string {
 // Injury styles unavailable status with the shared red role.
 func Injury(value string, mode ColorMode) string {
 	return style(value, "38;5;196", mode)
+}
+
+// LineupIndicator styles active or subdued favorable and unfavorable markers.
+func LineupIndicator(value string, favorable, subdued bool, mode ColorMode) string {
+	if mode != Color {
+		return value
+	}
+	role := "38;5;196"
+	if favorable {
+		role = "38;5;46"
+	}
+	restore := "\x1b[0m"
+	if subdued {
+		role = "38;5;124"
+		if favorable {
+			role = "38;5;34"
+		}
+		restore = "\x1b[38;5;245m"
+	}
+	return fmt.Sprintf("\x1b[%sm%s%s", role, value, restore)
 }
 
 // RosterRow applies the active, injured-list, or off-active semantic tier.

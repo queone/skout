@@ -34,15 +34,40 @@ func TestConfigAbsenceCompatibilityAndPrivateAtomicReplacement(t *testing.T) {
 	if strings.Contains(string(data), "pull_public") {
 		t.Fatalf("replacement retained deprecated field: %s", data)
 	}
+	written, err := ReadAt(path)
+	want := Config{CurrentLeague: value.CurrentLeague, CurrentTeamKey: value.CurrentTeamKey}
+	if err != nil || written != want {
+		t.Fatalf("replacement config = %#v, want %#v, error = %v", written, want, err)
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := info.Mode().Perm(); got != 0o640 {
-		t.Errorf("mode = %o, want 640", got)
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("mode = %o, want 600", got)
 	}
 	if entries, _ := os.ReadDir(filepath.Dir(path)); len(entries) != 1 {
 		t.Errorf("temporary files remain: %v", entries)
+	}
+}
+
+func TestConfigReplacementFailureRemovesTemporaryFile(t *testing.T) {
+	parent := t.TempDir()
+	path := filepath.Join(parent, "config.json")
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteAt(path, Config{CurrentLeague: "mlb.l.1"}); err == nil || !strings.Contains(err.Error(), "replace configuration") {
+		t.Fatalf("WriteAt error = %v", err)
+	}
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".config-") {
+			t.Fatalf("temporary config remains after failed replacement: %s", entry.Name())
+		}
 	}
 }
 

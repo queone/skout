@@ -33,3 +33,38 @@ func TestMatchupGoldensStaleAndColorAlignment(t *testing.T) {
 		}
 	}
 }
+
+func TestMatchupLineupIndicatorsKeepTheRustSubduedBoundary(t *testing.T) {
+	base := domain.PlayerWeekStats{Name: "Ada Hitter", Team: "NYY", PositionType: "B", SlotPosition: domain.PositionOutfield}
+	bench := base
+	bench.SlotPosition, bench.InjuryStatus = domain.PositionBench, "7:05p ● v BOS"
+	bench.GameIndicator = domain.GameIndicator{Kind: domain.GameIndicatorOutOfLineup}
+	injuredSlot := base
+	injuredSlot.SlotPosition, injuredSlot.InjuryStatus = domain.PositionInjuredList, "7:05p 2 v BOS"
+	injuredSlot.GameIndicator = domain.GameIndicator{Kind: domain.GameIndicatorBattingOrder, Order: 2}
+	injuredStatus := base
+	injuredStatus.InjuryStatus = "IL10 ● v BOS"
+	injuredStatus.GameIndicator = domain.GameIndicator{Kind: domain.GameIndicatorOutOfLineup}
+
+	tests := []struct {
+		name   string
+		player domain.PlayerWeekStats
+		want   string
+	}{
+		{name: "Bench", player: bench, want: "\x1b[38;5;124m●\x1b[38;5;245m"},
+		{name: "InjuredListSlot", player: injuredSlot, want: "\x1b[38;5;46m2\x1b[0m"},
+		{name: "InjuredListStatus", player: injuredStatus, want: "\x1b[38;5;196m●\x1b[0m"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			plain := matchupPlayerCell(test.player, "B", terminal.Plain)
+			colored := matchupPlayerCell(test.player, "B", terminal.Color)
+			if !strings.Contains(colored, test.want) {
+				t.Errorf("colored cell missing %q: %q", test.want, colored)
+			}
+			if terminal.VisibleWidth(plain) != terminal.VisibleWidth(colored) {
+				t.Errorf("width differs: plain=%q colored=%q", plain, colored)
+			}
+		})
+	}
+}

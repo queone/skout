@@ -67,6 +67,7 @@ func fantasyPlayerRow(player domain.StoredFantasyPlayer, roster bool, mode termi
 	if player.Slot != nil {
 		slot = *player.Slot
 	}
+	subdued := slot == "BN" || slot == "IL" || strings.HasPrefix(player.Status, "IL")
 	status := player.Status
 	if status == "" {
 		status = player.GameStatus
@@ -74,7 +75,7 @@ func fantasyPlayerRow(player domain.StoredFantasyPlayer, roster bool, mode termi
 	if status == "" {
 		status = "NoGame"
 	}
-	status = fantasyIndicator(fantasyFit(status, 17), player.GameIndicator, mode)
+	status = fantasyIndicator(fantasyFit(status, 17), player.GameIndicator, subdued, mode)
 	rank := "—"
 	if player.Rank != nil {
 		rank = strconv.FormatInt(*player.Rank, 10)
@@ -109,7 +110,7 @@ func fantasyPoolRow(player domain.StoredFantasyPlayer, mode terminal.ColorMode) 
 	if status == "" {
 		status = "NoGame"
 	}
-	status = fantasyIndicator(fantasyFit(status, 8), player.GameIndicator, mode)
+	status = fantasyIndicator(fantasyFit(status, 8), player.GameIndicator, false, mode)
 	hand, rank, ecr := player.Hand, "—", "—"
 	if hand == "" {
 		hand = "-"
@@ -387,7 +388,7 @@ func FantasyPositions(value string, closer bool) string {
 	return fantasyFit(compressed.String(), 5)
 }
 
-func fantasyIndicator(status string, indicator domain.GameIndicator, mode terminal.ColorMode) string {
+func fantasyIndicator(status string, indicator domain.GameIndicator, subdued bool, mode terminal.ColorMode) string {
 	marker := ""
 	switch indicator.Kind {
 	case domain.GameIndicatorBattingOrder:
@@ -398,10 +399,7 @@ func fantasyIndicator(status string, indicator domain.GameIndicator, mode termin
 	if marker == "" {
 		return status
 	}
-	styled := terminal.Good(marker, mode)
-	if indicator.Kind == domain.GameIndicatorOutOfLineup {
-		styled = terminal.Injury(marker, mode)
-	}
+	styled := terminal.LineupIndicator(marker, indicator.Kind != domain.GameIndicatorOutOfLineup, subdued, mode)
 	return strings.Replace(status, " "+marker+" ", " "+styled+" ", 1)
 }
 

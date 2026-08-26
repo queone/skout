@@ -30,6 +30,15 @@ func TestSelectColorModeUsesTerminalAndEnvironmentEvidence(t *testing.T) {
 }
 
 func TestStyleRolesAreExactAndPlainModeHasNoANSI(t *testing.T) {
+	if got, want := Title("skout", Color), "\x1b[1;38;5;231mskout\x1b[0m"; got != want {
+		t.Errorf("Title() = %q, want %q", got, want)
+	}
+	if got, want := Subtitle("advisor", Color), "\x1b[38;5;245madvisor\x1b[0m"; got != want {
+		t.Errorf("Subtitle() = %q, want %q", got, want)
+	}
+	if got, want := Section("USAGE", Color), "\x1b[38;5;255mUSAGE\x1b[0m"; got != want {
+		t.Errorf("Section() = %q, want %q", got, want)
+	}
 	if got, want := Usage("Usage:", Color), "\x1b[1;38;5;231mUsage:\x1b[0m"; got != want {
 		t.Errorf("Usage() = %q, want %q", got, want)
 	}
@@ -58,13 +67,39 @@ func TestStyleRolesAreExactAndPlainModeHasNoANSI(t *testing.T) {
 		t.Errorf("active row=%q", got)
 	}
 
-	for name, output := range map[string]string{
-		"Usage":   Usage("Usage:", Plain),
-		"Heading": Heading("BASEBALL", Plain),
-		"Alias":   Alias("Aliases: PA", Plain),
+	for name, test := range map[string]struct{ got, want string }{
+		"Title":    {Title("skout", Plain), "skout"},
+		"Subtitle": {Subtitle("advisor", Plain), "advisor"},
+		"Section":  {Section("USAGE", Plain), "USAGE"},
+		"Usage":    {Usage("Usage:", Plain), "Usage:"},
+		"Heading":  {Heading("BASEBALL", Plain), "BASEBALL"},
+		"Alias":    {Alias("Aliases: PA", Plain), "Aliases: PA"},
 	} {
-		if strings.Contains(output, "\x1b[") {
-			t.Errorf("%s plain output contains ANSI: %q", name, output)
+		if test.got != test.want || strings.Contains(test.got, "\x1b[") {
+			t.Errorf("%s plain output = %q, want %q", name, test.got, test.want)
 		}
+	}
+}
+
+func TestLineupIndicatorImplementsAllColorStates(t *testing.T) {
+	tests := []struct {
+		name               string
+		favorable, subdued bool
+		want               string
+	}{
+		{name: "Favorable", favorable: true, want: "\x1b[38;5;46m●\x1b[0m"},
+		{name: "Unfavorable", want: "\x1b[38;5;196m●\x1b[0m"},
+		{name: "SubduedFavorable", favorable: true, subdued: true, want: "\x1b[38;5;34m●\x1b[38;5;245m"},
+		{name: "SubduedUnfavorable", subdued: true, want: "\x1b[38;5;124m●\x1b[38;5;245m"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := LineupIndicator("●", test.favorable, test.subdued, Color); got != test.want {
+				t.Errorf("LineupIndicator() = %q, want %q", got, test.want)
+			}
+			if got := LineupIndicator("●", test.favorable, test.subdued, Plain); got != "●" {
+				t.Errorf("plain LineupIndicator() = %q", got)
+			}
+		})
 	}
 }

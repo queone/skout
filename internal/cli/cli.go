@@ -561,12 +561,13 @@ func rootAction(args []string) string {
 // RootHelp renders root help from the same descriptors used by parsing.
 func RootHelp(version string, mode terminal.ColorMode) string {
 	var output strings.Builder
-	output.WriteString(terminal.Heading("skout", mode))
+	output.WriteString(terminal.Title("skout", mode))
 	output.WriteString(" v" + version + "\n")
-	output.WriteString("Fantasy Baseball advisor — github.com/queone/skout\n\n")
-	output.WriteString(terminal.Usage("USAGE", mode))
+	output.WriteString(terminal.Subtitle("Fantasy Baseball advisor — github.com/queone/skout", mode))
+	output.WriteString("\n\n")
+	output.WriteString(terminal.Section("USAGE", mode))
 	output.WriteString("\n  skout <command> [flags]\n\n")
-	output.WriteString(terminal.Usage("COMMANDS", mode))
+	output.WriteString(terminal.Section("COMMANDS", mode))
 	output.WriteByte('\n')
 	for _, command := range commands {
 		if command.name == "fetch" {
@@ -578,7 +579,7 @@ func RootHelp(version string, mode terminal.ColorMode) string {
 		}
 	}
 	output.WriteByte('\n')
-	output.WriteString(terminal.Usage("FLAGS", mode))
+	output.WriteString(terminal.Section("FLAGS", mode))
 	output.WriteByte('\n')
 	for _, flag := range []struct{ label, description string }{{"-l, --league <key>", "Yahoo league key"}, {"-d, --debug", "Print operation diagnostics"}, {"-v, --version", "Print version"}, {"-h, -?, --help", "Print this help"}} {
 		helpRow(&output, flag.label, flag.description, 28)

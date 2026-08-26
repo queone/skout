@@ -161,6 +161,19 @@ func TestRootHelpAndGlossaryPlainBehaviorRemainFrozen(t *testing.T) {
 	}
 }
 
+func TestRootHelpColorRolesAreExact(t *testing.T) {
+	const version = "0.5.0"
+	plain := RootHelp(version, terminal.Plain)
+	want := strings.Replace(plain, "skout", "\x1b[1;38;5;231mskout\x1b[0m", 1)
+	want = strings.Replace(want, "Fantasy Baseball advisor — github.com/queone/skout", "\x1b[38;5;245mFantasy Baseball advisor — github.com/queone/skout\x1b[0m", 1)
+	want = strings.Replace(want, "USAGE", "\x1b[38;5;255mUSAGE\x1b[0m", 1)
+	want = strings.Replace(want, "COMMANDS", "\x1b[38;5;255mCOMMANDS\x1b[0m", 1)
+	want = strings.Replace(want, "\nFLAGS\n", "\n\x1b[38;5;255mFLAGS\x1b[0m\n", 1)
+	if got := RootHelp(version, terminal.Color); got != want {
+		t.Fatalf("colored root help differs\nGOT:\n%q\nWANT:\n%q", got, want)
+	}
+}
+
 func TestControlledNonFantasyContractDispatchesStreamsAndExitCodes(t *testing.T) {
 	type contractCase struct {
 		Name   string   `json:"name"`

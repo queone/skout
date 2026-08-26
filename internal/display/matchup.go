@@ -111,7 +111,7 @@ func matchupPlayerCell(player domain.PlayerWeekStats, role string, mode terminal
 	if status == "" {
 		status = "NoGame"
 	}
-	status = fantasyIndicator(fantasyFit(status, 17), player.GameIndicator, mode)
+	status = fantasyIndicator(fantasyFit(status, 17), player.GameIndicator, player.SlotPosition == domain.PositionBench, mode)
 	name := matchupName(player)
 	var stats string
 	if role == "B" {

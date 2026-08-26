@@ -89,10 +89,7 @@ func WriteAt(path string, config Config) error {
 	if err := os.MkdirAll(parent, 0o700); err != nil {
 		return pathError("create configuration directory", path, err)
 	}
-	mode := fs.FileMode(0o600)
-	if info, err := os.Stat(path); err == nil {
-		mode = info.Mode().Perm()
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	if _, err := os.Stat(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return pathError("inspect configuration", path, err)
 	}
 	data, err := json.MarshalIndent(config, "", "  ")
@@ -109,7 +106,7 @@ func WriteAt(path string, config Config) error {
 		_ = temporary.Close()
 		_ = os.Remove(temporaryName)
 	}
-	if err := temporary.Chmod(mode); err != nil {
+	if err := temporary.Chmod(0o600); err != nil {
 		cleanup()
 		return pathError("set temporary configuration permissions", path, err)
 	}
