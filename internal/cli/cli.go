@@ -15,8 +15,6 @@ import (
 	"github.com/queone/skout/internal/terminal"
 )
 
-const DeferredMessage = "skout: command not implemented in this migration slice\n"
-
 // Context contains all process evidence used by CLI behavior.
 type Context struct {
 	Stdin            io.Reader
@@ -36,6 +34,7 @@ type Handlers struct {
 	Fetch        func(host, path string) (string, error)
 	Status       func(league string) (string, error)
 	Sync         func(league, team string, debug bool, output io.Writer) (string, error)
+	Reset        func(input io.Reader, output io.Writer) error
 	Matchup      func(league, team string, week int, weekly bool, day string, debug bool) (string, error)
 	Teams        func(team string, force, debug bool) (string, error)
 	Totals       func(force, debug bool) (string, error)
@@ -55,7 +54,6 @@ type commandSpec struct {
 	minimum, maximum                     int
 	aliases                              []string
 	flags                                []flagSpec
-	deferred                             bool
 }
 
 var globalFlags = []flagSpec{{"-l", "--league", "KEY", "Yahoo league key", false}, {"-d", "--debug", "", "Print operation diagnostics", false}}
@@ -64,7 +62,7 @@ var commands = []commandSpec{
 	{name: "fetch", label: "fetch <host> <path>", description: "Fetch a raw provider path for debugging", positional: "HOST PATH", minimum: 2, maximum: 2},
 	{name: "st", label: "st", description: "Show status"},
 	{name: "sync", label: "sync", description: "Synchronize the selected league", flags: []flagSpec{{"-T", "--team", "TEAM", "Select the primary fantasy team", false}}},
-	{name: "reset", label: "reset", description: "Delete the local skout database", deferred: true},
+	{name: "reset", label: "reset", description: "Delete the local skout database"},
 	{name: "m", label: "m [team]", description: "Show a daily or weekly matchup", positional: "NAME", maximum: 1, flags: []flagSpec{{"-w", "--week", "WEEK", "Show a specific matchup week", false}, {"-W", "--weekly", "", "Show weekly running totals", false}, {"-D", "--day", "MMM-DD", "Show stats for a specific day", false}}},
 	{name: "t", label: "t [team]", description: "Show MLB 40-man rosters", positional: "TEAM", maximum: 1, flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
 	{name: "tt", label: "tt", description: "Show MLB standings and team totals", flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
@@ -118,6 +116,9 @@ func ProductionHandlers(version string, context Context) Handlers {
 				Input: context.Stdin, Prompt: context.Prompt, Output: output,
 				InputTerminal: context.StdinIsTerminal, PromptTerminal: context.StderrIsTerminal,
 			})
+		},
+		Reset: func(input io.Reader, output io.Writer) error {
+			return app.ResetProduction(input, output, mode)
 		},
 		Matchup: func(league, team string, week int, weekly bool, day string, _ bool) (string, error) {
 			return withMatchup(league, func(service *app.MatchupService) (string, error) {
@@ -229,10 +230,6 @@ func Run(args []string, version string, context Context, handlers Handlers) int 
 		}
 		fmt.Fprintf(context.Stderr, "skout debug: command=%s league_source=%s\n", parsed.spec.name, source)
 	}
-	if parsed.spec.deferred {
-		_, _ = io.WriteString(context.Stderr, DeferredMessage)
-		return 2
-	}
 	if parsed.spec.name == "i" {
 		return runGlossary(parsed, context)
 	}
@@ -257,6 +254,12 @@ func Run(args []string, version string, context Context, handlers Handlers) int 
 			err = fmt.Errorf("sync: runtime is unavailable; reinstall skout")
 		} else {
 			output, err = handlers.Sync(parsed.league, parsed.values["team"], parsed.debug, context.Stdout)
+		}
+	case "reset":
+		if handlers.Reset == nil {
+			err = fmt.Errorf("reset: runtime is unavailable; reinstall skout")
+		} else {
+			err = handlers.Reset(context.Stdin, context.Stdout)
 		}
 	case "m":
 		team := firstPositional(parsed.positionals)
@@ -317,6 +320,9 @@ func Run(args []string, version string, context Context, handlers Handlers) int 
 	if err != nil {
 		fmt.Fprintln(context.Stderr, err)
 		return 1
+	}
+	if parsed.spec.name == "reset" {
+		return 0
 	}
 	_, _ = io.WriteString(context.Stdout, output)
 	return 0

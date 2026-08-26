@@ -65,6 +65,31 @@ func TestStatusWithoutChangedSelectionDoesNotRewriteConfiguration(t *testing.T) 
 	}
 }
 
+func TestStatusProductionSharesDatabaseGuardAndKeepsInjectedStatusReadOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	databasePath, err := store.DatabasePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exclusive, err := store.AcquireDatabaseGuard(databasePath, store.DatabaseGuardExclusive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := StatusProduction("", terminal.Plain); err == nil || !strings.Contains(err.Error(), "another skout command") {
+		t.Fatalf("status during exclusive guard: %v", err)
+	}
+	if err := exclusive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := StatusProduction("", terminal.Plain); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(databasePath); !os.IsNotExist(err) {
+		t.Fatalf("status created database: %v", err)
+	}
+}
+
 func TestRenderStatusFixedOrderSuppressesLegacyYahooFailureAndBoundsErrors(t *testing.T) {
 	version, size, timestamp, state := int64(6), int64(100), int64(99), "success"
 	legacy := "fetch authenticated Yahoo: run skout login to reauthorize"

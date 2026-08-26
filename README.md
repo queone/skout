@@ -40,6 +40,7 @@ skout sync -l 170874       # select and refresh a public Yahoo league
 skout sync -T Toros        # select the primary fantasy team
 skout st                   # inspect local provider and snapshot status
 skout st -l 170874         # save a league selection and clear an incompatible team
+skout reset                # explicitly delete the local skout database
 
 # MLB-wide views
 skout t                    # every MLB 40-man roster
@@ -72,6 +73,8 @@ skout fetch <host> <path>  # inspect an allowlisted provider response
 skout --help               # show command help
 skout --version            # show the binary version
 ```
+
+`skout reset` displays the database path and accepts only `y` or `yes` before deleting it. It removes the database and its SQLite auxiliary files while preserving configuration, provider cache entries, and unrelated files. Reset refuses to run while another skout command is using the local database.
 
 Use `-d` or `--debug` to print operation diagnostics. Complete command snapshots remain usable with a stale warning when a provider refresh fails. Output uses semantic color in supported terminals and equivalent plain text when redirected, when `NO_COLOR` is set, or when `TERM=dumb`.
 

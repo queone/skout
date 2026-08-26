@@ -317,7 +317,7 @@ func TestProductDocumentationMatchesTheExecutablePublicSurface(t *testing.T) {
 	if match := forbiddenNarration.FindString(readme); match != "" {
 		t.Fatalf("README contains non-product narration %q", match)
 	}
-	for _, evidence := range []string{"public-only", "never changes a Yahoo roster", "./build.sh", "Requires Go", "skout sync", "skout st", "skout t", "skout tt", "skout sp", "skout i", "skout fetch"} {
+	for _, evidence := range []string{"public-only", "never changes a Yahoo roster", "./build.sh", "Requires Go", "skout sync", "skout st", "skout reset", "skout t", "skout tt", "skout sp", "skout i", "skout fetch", "accepts only `y` or `yes`", "preserving configuration"} {
 		if !strings.Contains(readme, evidence) {
 			t.Fatalf("README lacks %q", evidence)
 		}
@@ -327,12 +327,6 @@ func TestProductDocumentationMatchesTheExecutablePublicSurface(t *testing.T) {
 			t.Fatalf("README lacks active command %q", command)
 		}
 	}
-	for _, command := range []string{"skout reset"} {
-		if strings.Contains(readme, command) {
-			t.Fatalf("README documents unavailable command %q", command)
-		}
-	}
-
 	plan := read("plan.md")
 	wantPlanHeadings := []string{"## Product Direction", "## Ideas To Explore"}
 	if got := headings(plan); !reflect.DeepEqual(got, wantPlanHeadings) {
@@ -347,9 +341,12 @@ func TestProductDocumentationMatchesTheExecutablePublicSurface(t *testing.T) {
 			t.Fatalf("plan contains non-IE idea entry %q", line)
 		}
 	}
+	if strings.Contains(plan, "IE4") {
+		t.Fatal("plan retains delivered IE4")
+	}
 
 	architecture := read("arch.md")
-	for _, evidence := range []string{"public endpoints only", "schema version 6", "Credentials", "roster mutation", "background", "fantasy matchup", "parity review", "already archived"} {
+	for _, evidence := range []string{"public endpoints only", "schema version 6", "Credentials", "roster mutation", "background", "fantasy matchup", "database-operation lock", "skout.db-wal", "Every advertised command now has an executable Go path", "parity review", "already archived"} {
 		if !strings.Contains(architecture, evidence) {
 			t.Fatalf("architecture lacks boundary evidence %q", evidence)
 		}

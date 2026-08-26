@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -31,7 +32,21 @@ func StatusProduction(requestedLeague string, mode terminal.ColorMode) (string, 
 	if err != nil {
 		return "", fmt.Errorf("status: resolve database path: %w", err)
 	}
-	return Status(LocalOptions{ConfigPath: configPath, DatabasePath: databasePath, Now: time.Now, Mode: mode}, requestedLeague)
+	guard, err := store.AcquireDatabaseGuard(databasePath, store.DatabaseGuardShared)
+	if err != nil {
+		return "", fmt.Errorf("status: acquire database operation guard: %w", err)
+	}
+	output, statusErr := Status(LocalOptions{ConfigPath: configPath, DatabasePath: databasePath, Now: time.Now, Mode: mode}, requestedLeague)
+	guardErr := guard.Close()
+	if statusErr != nil || guardErr != nil {
+		return "", errors.Join(statusErr, func() error {
+			if guardErr == nil {
+				return nil
+			}
+			return fmt.Errorf("status: release database operation guard: %w", guardErr)
+		}())
+	}
+	return output, nil
 }
 
 // Status renders the fixed-order local dashboard and persists an explicit league selection.

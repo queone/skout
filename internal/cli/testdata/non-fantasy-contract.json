@@ -5,5 +5,5 @@
   {"name":"teams","args":["t","NYY","--force"],"code":0,"stdout":"teams:NYY:true\n","stderr":""},
   {"name":"totals","args":["-d","tt"],"code":0,"stdout":"totals:false\n","stderr":"skout debug: command=tt league_source=saved\n"},
   {"name":"probables","args":["sp","-f"],"code":0,"stdout":"probables:true\n","stderr":""},
-  {"name":"reset","args":["reset"],"code":2,"stdout":"","stderr":"skout: command not implemented in this migration slice\n"}
+  {"name":"reset","args":["reset"],"code":0,"stdout":"reset:unused\n","stderr":""}
 ]

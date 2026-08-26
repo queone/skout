@@ -37,6 +37,7 @@ type Store struct {
 	conn  *sql.Conn
 	path  string
 	clock Clock
+	guard *DatabaseGuard
 }
 
 // DatabasePath resolves the production database path without creating it.
@@ -54,7 +55,16 @@ func Open() (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return OpenAt(path)
+	guard, err := AcquireDatabaseGuard(path, DatabaseGuardShared)
+	if err != nil {
+		return nil, fmt.Errorf("open database: acquire operation guard: %w", err)
+	}
+	database, err := OpenAt(path)
+	if err != nil {
+		return nil, errors.Join(err, guard.Close())
+	}
+	database.guard = guard
+	return database, nil
 }
 
 // OpenAt opens and migrates an explicit database.
@@ -153,6 +163,12 @@ func (store *Store) Close() error {
 			failures = append(failures, operationError("close database", store.path, err))
 		}
 		store.db = nil
+	}
+	if store.guard != nil {
+		if err := store.guard.Close(); err != nil {
+			failures = append(failures, fmt.Errorf("close database operation guard: %w", err))
+		}
+		store.guard = nil
 	}
 	return errors.Join(failures...)
 }

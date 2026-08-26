@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,7 +18,7 @@ func TestProductionVersionAndRootHelpWiring(t *testing.T) {
 	}{
 		{args: nil, fixture: "testdata/root-help.txt"},
 		{args: []string{"--help"}, fixture: "testdata/root-help.txt"},
-		{args: []string{"--version"}, want: "skout 0.5.0\n"},
+		{args: []string{"--version"}, want: "skout " + programVersion + "\n"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(test.args, &stdout, &stderr); code != 0 {
@@ -29,7 +30,7 @@ func TestProductionVersionAndRootHelpWiring(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want = string(data)
+			want = strings.Replace(string(data), "{{VERSION}}", programVersion, 1)
 		}
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Errorf("run(%v) stdout=%q stderr=%q", test.args, stdout.String(), stderr.String())
@@ -37,9 +38,9 @@ func TestProductionVersionAndRootHelpWiring(t *testing.T) {
 	}
 }
 
-func TestProductionFantasyWiringAndSoleDeferredReset(t *testing.T) {
+func TestProductionFantasyAndResetWiringHasNoDeferredCommands(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"reset"}, &stdout, &stderr); code != 2 || stdout.Len() != 0 || stderr.String() != cli.DeferredMessage {
+	if code := run([]string{"reset"}, &stdout, &stderr); code != 1 || stdout.Len() != 0 || stderr.String() != "reset: runtime is unavailable; reinstall skout\n" {
 		t.Fatalf("reset code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	for command, diagnostic := range map[string]string{"m": "match", "r": "roster", "rt": "roster totals", "h": "player", "p": "player"} {
@@ -50,8 +51,8 @@ func TestProductionFantasyWiringAndSoleDeferredReset(t *testing.T) {
 		}
 	}
 	handlers := cli.ProductionHandlers(programVersion, cli.Context{})
-	if handlers.Matchup == nil || handlers.Roster == nil || handlers.RosterTotals == nil || handlers.Hitters == nil || handlers.Pitchers == nil {
-		t.Fatal("one or more fantasy production handlers are unwired")
+	if handlers.Reset == nil || handlers.Matchup == nil || handlers.Roster == nil || handlers.RosterTotals == nil || handlers.Hitters == nil || handlers.Pitchers == nil {
+		t.Fatal("one or more production handlers are unwired")
 	}
 	stdout.Reset()
 	stderr.Reset()
@@ -60,7 +61,40 @@ func TestProductionFantasyWiringAndSoleDeferredReset(t *testing.T) {
 	}
 }
 
-func TestFantasyDocumentationDescribesExecutableSurfaceAndRemainingPlan(t *testing.T) {
+func TestProductionResetUsesInjectedProcessStreamsAndExactLocalBoundary(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	databasePath := filepath.Join(home, ".config", "skout", "skout.db")
+	if err := os.MkdirAll(filepath.Dir(databasePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{databasePath, databasePath + "-wal", databasePath + "-shm", databasePath + "-journal"} {
+		if err := os.WriteFile(path, []byte("delete"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	preserved := filepath.Join(filepath.Dir(databasePath), "config.json")
+	if err := os.WriteFile(preserved, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	context := cli.Context{Stdin: strings.NewReader("yes\n"), Stdout: &stdout, Stderr: &stderr}
+	code := cli.Run([]string{"reset"}, programVersion, context, cli.ProductionHandlers(programVersion, context))
+	want := "This will delete " + databasePath + " and require a full re-sync.\nContinue? [y/N] Database deleted. Run skout sync to rebuild.\n"
+	if code != 0 || stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	for _, path := range []string{databasePath, databasePath + "-wal", databasePath + "-shm", databasePath + "-journal"} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Errorf("reset target %s remains: %v", path, err)
+		}
+	}
+	if data, err := os.ReadFile(preserved); err != nil || string(data) != "keep" {
+		t.Fatalf("preserved config data=%q err=%v", data, err)
+	}
+}
+
+func TestDocumentationDescribesCompleteExecutableSurfaceAndRemainingPlan(t *testing.T) {
 	read := func(path string) string {
 		t.Helper()
 		data, err := os.ReadFile(path)
@@ -72,7 +106,7 @@ func TestFantasyDocumentationDescribesExecutableSurfaceAndRemainingPlan(t *testi
 	readme := read("../../README.md")
 	architecture := read("../../arch.md")
 	plan := read("../../plan.md")
-	for _, command := range []string{"skout m", "skout r", "skout rt", "skout h", "skout p"} {
+	for _, command := range []string{"skout reset", "skout m", "skout r", "skout rt", "skout h", "skout p"} {
 		if !strings.Contains(readme, command) {
 			t.Errorf("README missing %q", command)
 		}
@@ -80,7 +114,7 @@ func TestFantasyDocumentationDescribesExecutableSurfaceAndRemainingPlan(t *testi
 	if !strings.Contains(architecture, "Rust reference repository is already archived") || !strings.Contains(architecture, "Only the final cross-repository parity review remains") {
 		t.Errorf("architecture migration boundary is inaccurate")
 	}
-	if strings.Count(plan, "## ") != 2 || !strings.Contains(plan, "## Product Direction") || !strings.Contains(plan, "## Ideas To Explore") || strings.Contains(plan, "IE1") || strings.Contains(plan, "IE2") || strings.Contains(plan, "IE3") || !strings.Contains(plan, "IE4") {
+	if strings.Count(plan, "## ") != 2 || !strings.Contains(plan, "## Product Direction") || !strings.Contains(plan, "## Ideas To Explore") || strings.Contains(plan, "IE1") || strings.Contains(plan, "IE2") || strings.Contains(plan, "IE3") || strings.Contains(plan, "IE4") {
 		t.Errorf("plan structure or delivered ideas are inaccurate: %q", plan)
 	}
 }

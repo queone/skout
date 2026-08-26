@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strconv"
@@ -143,9 +144,11 @@ func TestRootHelpAndGlossaryPlainBehaviorRemainFrozen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	const version = "0.5.0"
+	want = []byte(strings.Replace(string(want), "{{VERSION}}", version, 1))
 	for _, args := range [][]string{nil, {"-h"}, {"-?"}, {"--help"}} {
 		var stdout, stderr bytes.Buffer
-		code := Run(args, "0.5.0", Context{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}, Handlers{})
+		code := Run(args, version, Context{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}, Handlers{})
 		if code != 0 || !bytes.Equal(stdout.Bytes(), want) || stderr.Len() != 0 {
 			t.Errorf("root %v code=%d stdout differs=%v stderr=%q", args, code, !bytes.Equal(stdout.Bytes(), want), stderr.String())
 		}
@@ -189,6 +192,14 @@ func TestControlledNonFantasyContractDispatchesStreamsAndExitCodes(t *testing.T)
 			return "totals:" + boolText(force) + "\n", nil
 		},
 		Probables: func(force, _ bool) (string, error) { return "probables:" + boolText(force) + "\n", nil },
+		Reset: func(input io.Reader, output io.Writer) error {
+			value, err := io.ReadAll(input)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(output, "reset:%s\n", value)
+			return err
+		},
 	}
 	for _, test := range cases {
 		t.Run(test.Name, func(t *testing.T) {
@@ -227,9 +238,21 @@ func TestSyncDispatchesFrozenFlagPlacementsAndStreamsProgress(t *testing.T) {
 	}
 }
 
-func TestGlobalFlagPlacementConflictsDiagnosticsAndDeferredIsolation(t *testing.T) {
+func TestGlobalFlagPlacementConflictsDiagnosticsAndResetDispatch(t *testing.T) {
 	statusCalls := 0
-	handlers := Handlers{Status: func(league string) (string, error) { statusCalls++; return league, nil }}
+	resetCalls := 0
+	handlers := Handlers{
+		Status: func(league string) (string, error) { statusCalls++; return league, nil },
+		Reset: func(input io.Reader, output io.Writer) error {
+			resetCalls++
+			value, err := io.ReadAll(input)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(output, "reset:%s", value)
+			return err
+		},
+	}
 	for _, args := range [][]string{{"-l", "one", "st"}, {"st", "--league=one"}, {"st", "-lone"}, {"-d", "st", "-l", "one"}} {
 		var stdout, stderr bytes.Buffer
 		if code := Run(args, "0.2.0", Context{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}, handlers); code != 0 || stdout.String() != "one" {
@@ -244,15 +267,61 @@ func TestGlobalFlagPlacementConflictsDiagnosticsAndDeferredIsolation(t *testing.
 	}
 	var stdout, stderr bytes.Buffer
 	input := strings.NewReader("yes\n")
-	if code := Run([]string{"reset"}, "0.2.0", Context{Stdin: input, Stdout: &stdout, Stderr: &stderr, Prompt: &stderr}, handlers); code != 2 || stderr.String() != DeferredMessage {
-		t.Fatalf("reset code=%d stderr=%q", code, stderr.String())
+	if code := Run([]string{"reset"}, "0.2.0", Context{Stdin: input, Stdout: &stdout, Stderr: &stderr, Prompt: &stderr}, handlers); code != 0 || stdout.String() != "reset:yes\n" || stderr.Len() != 0 {
+		t.Fatalf("reset code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	remaining, _ := io.ReadAll(input)
-	if string(remaining) != "yes\n" {
-		t.Fatal("reset read confirmation")
+	if len(remaining) != 0 || resetCalls != 1 {
+		t.Fatalf("reset remaining=%q calls=%d", remaining, resetCalls)
 	}
 	if statusCalls != 4 {
 		t.Fatalf("status calls=%d", statusCalls)
+	}
+}
+
+func TestResetDispatchOwnsStandardStreamsAndApplicationErrors(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		args    []string
+		handler func(io.Reader, io.Writer) error
+		code    int
+		stdout  string
+		stderr  string
+	}{
+		{
+			name: "success", args: []string{"reset"}, code: 0, stdout: "prompt\nresult\n",
+			handler: func(input io.Reader, output io.Writer) error {
+				value, err := io.ReadAll(input)
+				if err != nil || string(value) != "yes\n" {
+					return fmt.Errorf("input=%q err=%v", value, err)
+				}
+				_, err = io.WriteString(output, "prompt\nresult\n")
+				return err
+			},
+		},
+		{
+			name: "application failure", args: []string{"reset"}, code: 1, stdout: "prompt\n", stderr: "injected reset failure\n",
+			handler: func(_ io.Reader, output io.Writer) error {
+				_, _ = io.WriteString(output, "prompt\n")
+				return errors.New("injected reset failure")
+			},
+		},
+		{name: "unavailable", args: []string{"reset"}, code: 1, stderr: "reset: runtime is unavailable; reinstall skout\n"},
+		{
+			name: "global flags", args: []string{"-d", "-l", "mlb.l.1", "reset"}, code: 0, stdout: "done\n", stderr: "skout debug: command=reset league_source=override\n",
+			handler: func(_ io.Reader, output io.Writer) error {
+				_, err := io.WriteString(output, "done\n")
+				return err
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := Run(test.args, "0.5.0", Context{Stdin: strings.NewReader("yes\n"), Stdout: &stdout, Stderr: &stderr, Prompt: &stderr}, Handlers{Reset: test.handler})
+			if code != test.code || stdout.String() != test.stdout || stderr.String() != test.stderr {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+		})
 	}
 }
 

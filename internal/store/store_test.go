@@ -93,6 +93,48 @@ func TestStoreFreshSchemaPragmasPermissionsAndClose(t *testing.T) {
 	}
 }
 
+func TestProductionOpenOwnsAndReleasesSharedDatabaseGuard(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	database, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := DatabasePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AcquireDatabaseGuard(path, DatabaseGuardExclusive); err == nil {
+		t.Fatal("exclusive guard acquired while production store remained open")
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	guard, err := AcquireDatabaseGuard(path, DatabaseGuardExclusive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := guard.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(path, []byte("not sqlite"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if opened, err := Open(); err == nil {
+		opened.Close()
+		t.Fatal("invalid production database opened")
+	}
+	guard, err = AcquireDatabaseGuard(path, DatabaseGuardExclusive)
+	if err != nil {
+		t.Fatalf("failed Open retained guard: %v", err)
+	}
+	guard.Close()
+}
+
 func TestStoreMigratesEverySupportedVersionAndRollsBackInjectedFailures(t *testing.T) {
 	for version := int64(1); version < CurrentSchemaVersion; version++ {
 		t.Run("Version"+string(rune('0'+version)), func(t *testing.T) {
