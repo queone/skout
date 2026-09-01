@@ -109,6 +109,11 @@ func Injury(value string, mode ColorMode) string {
 	return style(value, "38;5;196", mode)
 }
 
+// Inactive styles not-active roster status with the shared dark-red role.
+func Inactive(value string, mode ColorMode) string {
+	return style(value, "38;5;88", mode)
+}
+
 // LineupIndicator styles active or subdued favorable and unfavorable markers.
 func LineupIndicator(value string, favorable, subdued bool, mode ColorMode) string {
 	if mode != Color {

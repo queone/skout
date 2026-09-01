@@ -137,6 +137,9 @@ func matchupPlayerCell(player domain.PlayerWeekStats, role string, mode terminal
 		stats = fmt.Sprintf("%6s%4d%4d%4d%6s%6s", ip, player.Wins, player.Saves, player.Strikeouts, era, whip)
 	}
 	row := name + status + stats
+	if strings.EqualFold(strings.TrimSpace(player.InjuryStatus), "NA") {
+		return terminal.Inactive(row, mode)
+	}
 	if player.SlotPosition == domain.PositionInjuredList || strings.HasPrefix(player.InjuryStatus, "IL") {
 		return terminal.Warning(row, mode)
 	}

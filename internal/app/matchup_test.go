@@ -106,6 +106,40 @@ func TestScheduledGamesWithLinescoreStubsShowGameTimesNotEmptyStatus(t *testing.
 	}
 }
 
+func TestMatchupGameStatusKeepsInjuredAndInactiveLabels(t *testing.T) {
+	players := []domain.PlayerWeekStats{
+		{YahooPlayerID: 101, Name: "Injured Hitter", Team: "NYY", PositionType: "B", SlotPosition: domain.PositionInjuredList, InjuryStatus: "IL15"},
+		{YahooPlayerID: 102, Name: "Inactive Hitter", Team: "NYY", PositionType: "B", SlotPosition: domain.PositionBench, InjuryStatus: "NA"},
+		{YahooPlayerID: 103, Name: "Active Hitter", Team: "NYY", PositionType: "B", SlotPosition: domain.PositionOutfield},
+	}
+	games := []providers.ScheduleGame{{GameID: 1, AwayTeamID: 147, HomeTeamID: 139, DetailedState: "Scheduled", GameDate: "2026-09-01T23:40:00Z", AwayLineup: []providers.LineupPlayer{{PersonID: 1001}, {PersonID: 1003}}}}
+	applyMatchupGameStatus(players, games, map[int64]int64{101: 1001, 102: 1002, 103: 1003})
+	if players[0].InjuryStatus != "IL15" || players[0].GameIndicator != (domain.GameIndicator{}) {
+		t.Fatalf("injured=%+v", players[0])
+	}
+	if players[1].InjuryStatus != "NA" || players[1].GameIndicator != (domain.GameIndicator{}) {
+		t.Fatalf("inactive=%+v", players[1])
+	}
+	if !strings.HasSuffix(players[2].InjuryStatus, "2 @ TB") || players[2].GameIndicator.Kind != domain.GameIndicatorBattingOrder {
+		t.Fatalf("active=%+v", players[2])
+	}
+}
+
+func TestMatchupRosterStatusLabelsReplaceBareInjuredListLabels(t *testing.T) {
+	ids := []int64{101, 102, 103}
+	local := []domain.StoredFantasyPlayer{{YahooPlayerID: &ids[0], Status: "IL15"}, {YahooPlayerID: &ids[1], Status: "IL60"}, {YahooPlayerID: &ids[2], Status: "IL10"}}
+	players := []domain.PlayerWeekStats{
+		{YahooPlayerID: 101, InjuryStatus: "IL"},
+		{YahooPlayerID: 102, InjuryStatus: "7:05p v BOS"},
+		{YahooPlayerID: 103, InjuryStatus: "NA"},
+		{YahooPlayerID: 104, InjuryStatus: "IL"},
+	}
+	applyRosterStatusLabels(players, local)
+	if players[0].InjuryStatus != "IL15" || players[1].InjuryStatus != "7:05p v BOS" || players[2].InjuryStatus != "NA" || players[3].InjuryStatus != "IL" {
+		t.Fatalf("players=%+v", players)
+	}
+}
+
 func TestMatchupEnforcesTheSixHourAutoSyncGate(t *testing.T) {
 	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	service := matchupServiceForTest(t, now)

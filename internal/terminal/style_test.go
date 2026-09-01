@@ -48,12 +48,16 @@ func TestStyleRolesAreExactAndPlainModeHasNoANSI(t *testing.T) {
 	if got, want := Alias("Aliases: PA", Color), "\x1b[38;5;245mAliases: PA\x1b[0m"; got != want {
 		t.Errorf("Alias() = %q, want %q", got, want)
 	}
+	if got, want := Inactive("NA", Color), "\x1b[38;5;88mNA\x1b[0m"; got != want {
+		t.Errorf("Inactive() = %q, want %q", got, want)
+	}
 	for name, got := range map[string]string{
 		"TableHeading": TableHeading("TEAM", Color),
 		"Dim":          Dim("context", Color),
 		"Good":         Good("available", Color),
 		"Warning":      Warning("warning", Color),
 		"Injury":       Injury("IL", Color),
+		"Inactive":     Inactive("NA", Color),
 		"RosterRow":    RosterRow("row", "D10", Color),
 	} {
 		if !strings.HasPrefix(got, "\x1b[") || !strings.HasSuffix(got, "\x1b[0m") {
@@ -74,6 +78,7 @@ func TestStyleRolesAreExactAndPlainModeHasNoANSI(t *testing.T) {
 		"Usage":    {Usage("Usage:", Plain), "Usage:"},
 		"Heading":  {Heading("BASEBALL", Plain), "BASEBALL"},
 		"Alias":    {Alias("Aliases: PA", Plain), "Aliases: PA"},
+		"Inactive": {Inactive("NA", Plain), "NA"},
 	} {
 		if test.got != test.want || strings.Contains(test.got, "\x1b[") {
 			t.Errorf("%s plain output = %q, want %q", name, test.got, test.want)

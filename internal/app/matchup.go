@@ -611,6 +611,8 @@ func (service *MatchupService) enrichView(view domain.MatchupView, period matchu
 				local = players
 				identities = fantasyIdentityMap(players)
 			}
+			applyRosterStatusLabels(view.Mine.Players, local)
+			applyRosterStatusLabels(view.Opponent.Players, local)
 			applyMatchupGameStatus(view.Mine.Players, games, identities)
 			applyMatchupGameStatus(view.Opponent.Players, games, identities)
 			view.Odds = service.matchupOdds(games, view, local, prefetch)
@@ -868,8 +870,36 @@ func fantasyIdentityMap(players []domain.StoredFantasyPlayer) map[int64]int64 {
 	return identities
 }
 
+// applyRosterStatusLabels replaces an injured-list label from the matchup feed,
+// usually a bare IL, with the local roster label for the same Yahoo player so
+// the matchup and roster views agree on the injured-list length.
+func applyRosterStatusLabels(players []domain.PlayerWeekStats, local []domain.StoredFantasyPlayer) {
+	labels := make(map[int64]string, len(local))
+	for _, player := range local {
+		if player.YahooPlayerID != nil && strings.HasPrefix(strings.ToUpper(player.Status), "IL") {
+			labels[*player.YahooPlayerID] = player.Status
+		}
+	}
+	for index := range players {
+		player := &players[index]
+		if label, ok := labels[player.YahooPlayerID]; ok && strings.HasPrefix(strings.ToUpper(player.InjuryStatus), "IL") {
+			player.InjuryStatus = label
+		}
+	}
+}
+
+// keepsRosterStatus reports whether a player's injured-list or not-active
+// status stays visible instead of the day's game status.
+func keepsRosterStatus(status string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(status))
+	return upper == "NA" || strings.HasPrefix(upper, "IL")
+}
+
 func applyMatchupGameStatus(players []domain.PlayerWeekStats, games []providers.ScheduleGame, identities map[int64]int64) {
 	for index := range players {
+		if keepsRosterStatus(players[index].InjuryStatus) {
+			continue
+		}
 		for _, game := range games {
 			player := &players[index]
 			away := MLBTeamAbbreviation(game.AwayTeamID) == player.Team

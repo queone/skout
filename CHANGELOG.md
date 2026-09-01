@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.10.0 | AC19 matchup keeps IL and NA labels with IL length, NA rows dark red |
 | 0.9.1 | AC18 fix fresh-database identity matching for AZ and ATH players |
 | 0.9.0 | AC17 5-minute live reuse window makes repeat fantasy commands instant |
 | 0.8.0 | AC15+AC16 season archive with -S views, 6h fantasy auto-sync, display fixes |

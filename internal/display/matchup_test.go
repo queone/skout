@@ -68,3 +68,32 @@ func TestMatchupLineupIndicatorsKeepTheRustSubduedBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestMatchupCellColorsInactiveRowsDarkRed(t *testing.T) {
+	base := domain.PlayerWeekStats{Name: "Ada Hitter", Team: "NYY", PositionType: "B"}
+	inactive := base
+	inactive.SlotPosition, inactive.InjuryStatus = domain.PositionThirdBase, "NA"
+	inactiveBench := base
+	inactiveBench.SlotPosition, inactiveBench.InjuryStatus = domain.PositionBench, "NA"
+	injured := base
+	injured.SlotPosition, injured.InjuryStatus = domain.PositionOutfield, "IL15"
+	for name, test := range map[string]struct {
+		player domain.PlayerWeekStats
+		prefix string
+	}{
+		"InactiveActiveSlot": {inactive, "\x1b[38;5;88m"},
+		"InactiveBench":      {inactiveBench, "\x1b[38;5;88m"},
+		"InjuredActiveSlot":  {injured, "\x1b[38;5;100m"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			plain := matchupPlayerCell(test.player, "B", terminal.Plain)
+			colored := matchupPlayerCell(test.player, "B", terminal.Color)
+			if !strings.HasPrefix(colored, test.prefix) || !strings.HasSuffix(colored, "\x1b[0m") || !strings.Contains(plain, test.player.InjuryStatus) {
+				t.Fatalf("plain=%q colored=%q", plain, colored)
+			}
+			if terminal.VisibleWidth(plain) != terminal.VisibleWidth(colored) {
+				t.Fatalf("width differs: plain=%q colored=%q", plain, colored)
+			}
+		})
+	}
+}
