@@ -18,10 +18,11 @@ _prep_warning=''
 _prep_cl_err=''
 _prep_bump_err=''
 _prep_ie_err=''
-_prep_build_err=''
 _prep_vtargets=''
 _prep_ctargets=''
+_prep_owned_dir=''
 _build_owned_dir=''
+_build_install_temps=()
 
 # ── color ────────────────────────────────────────────────────────────────────
 # A sequence is emitted only when color is both enabled (NO_COLOR unset, TERM != dumb, stdout a TTY) and 256-color capable (COLORTERM
@@ -142,6 +143,35 @@ _trim() {
 # _byte_len STR -> number of bytes (Go len() counts bytes, not runes).
 _byte_len() { LC_ALL=C printf '%s' "$1" | LC_ALL=C wc -c | tr -d ' '; }
 
+_shell_quote() { # $1=single shell argument
+  local value="$1"
+  value=${value//\'/\'\\\'\'}
+  printf "'%s'" "$value"
+}
+
+_validate_release_message() { # $1=prefix $2=message
+  local prefix="$1" message="$2" mlen
+  if [ -z "$message" ]; then
+    printf '%s: message must be non-empty\n' "$prefix" >&2
+    return 1
+  fi
+  mlen=$(_byte_len "$message")
+  if [ "$mlen" -gt 80 ]; then
+    printf '%s: message must be 80 bytes or fewer (got %d)\n' "$prefix" "$mlen" >&2
+    return 1
+  fi
+  case "$message" in
+  *'|'*)
+    printf '%s: message must fit one Markdown table cell and cannot contain |\n' "$prefix" >&2
+    return 1
+    ;;
+  *$'\n'* | *$'\r'*)
+    printf '%s: message must be one line\n' "$prefix" >&2
+    return 1
+    ;;
+  esac
+}
+
 # _go_quote STR -> Go %q rendering (strconv.Quote), byte-safe. Escapes \ and ",
 # the named control escapes \a \b \t \n \v \f \r, and any other control byte
 # (<0x20) or DEL (0x7f) as \xHH; printable ASCII and high bytes pass through.
@@ -193,12 +223,28 @@ only against those cmd packages. To validate the full repo, run with no targets.
 _failure() { printf '%s\n' "$1" >&2; }
 
 _cleanup_build_owned() {
-  [ -n "${_build_owned_dir:-}" ] || return 0
-  if [ -d "$_build_owned_dir" ] && ! rm -rf -- "$_build_owned_dir"; then
+  local cleanup_failed=0 path
+  for path in "${_build_install_temps[@]+"${_build_install_temps[@]}"}"; do
+    [ -n "$path" ] || continue
+    if { [ -e "$path" ] || [ -L "$path" ]; } && ! rm -f -- "$path"; then
+      printf 'build: cleanup failed for owned path %s\n' "$path" >&2
+      cleanup_failed=1
+    fi
+  done
+  _build_install_temps=()
+  if [ -n "${_build_owned_dir:-}" ] && [ -d "$_build_owned_dir" ] && ! rm -rf -- "$_build_owned_dir"; then
     printf 'build: cleanup failed for owned path %s\n' "$_build_owned_dir" >&2
-    return 1
+    cleanup_failed=1
   fi
   _build_owned_dir=''
+  return "$cleanup_failed"
+}
+
+_build_signal_exit() { # $1=conventional signal exit status
+  local status="$1"
+  trap - EXIT HUP INT TERM
+  if ! _cleanup_build_owned; then :; fi
+  exit "$status"
 }
 
 # build_run VERBOSE TARGETS... — targets empty => whole repo.
@@ -207,11 +253,95 @@ build_run() {
   shift
   local targets=("$@")
 
+  local discovered_targets=() install_targets=() install_versions=()
+  local d target candidate found available
+  for d in cmd/*/; do
+    [ -f "${d}main.go" ] || continue
+    discovered_targets+=("$(basename "$d")")
+  done
+  if [ "${#discovered_targets[@]}" -gt 0 ]; then
+    local discovered_list
+    discovered_list=$(printf '%s\n' "${discovered_targets[@]}" | LC_ALL=C sort)
+    discovered_targets=()
+    while IFS= read -r candidate || [ -n "$candidate" ]; do
+      [ -n "$candidate" ] && discovered_targets+=("$candidate")
+    done <<EOF
+$discovered_list
+EOF
+  fi
+
+  if [ "${#targets[@]}" -eq 0 ]; then
+    install_targets=("${discovered_targets[@]+"${discovered_targets[@]}"}")
+  else
+    available='(none)'
+    [ "${#discovered_targets[@]}" -eq 0 ] || available="${discovered_targets[*]}"
+    for target in "${targets[@]}"; do
+      case "$target" in
+      '' | */* | *\\*)
+        printf 'invalid target %s; use one discovered command name without path components\n' "$(_go_quote "$target")" >&2
+        return 2
+        ;;
+      esac
+      found=0
+      for candidate in "${discovered_targets[@]+"${discovered_targets[@]}"}"; do
+        if [ "$candidate" = "$target" ]; then found=1; break; fi
+      done
+      if [ "$found" -ne 1 ]; then
+        printf 'unknown target %s; available targets: %s\n' "$(_go_quote "$target")" "$available" >&2
+        return 2
+      fi
+      for candidate in "${install_targets[@]+"${install_targets[@]}"}"; do
+        if [ "$candidate" = "$target" ]; then
+          printf 'duplicate target %s; list each target once\n' "$(_go_quote "$target")" >&2
+          return 2
+        fi
+      done
+      install_targets+=("$target")
+    done
+    local selected_list
+    selected_list=$(printf '%s\n' "${install_targets[@]}" | LC_ALL=C sort)
+    install_targets=()
+    while IFS= read -r candidate || [ -n "$candidate" ]; do
+      [ -n "$candidate" ] && install_targets+=("$candidate")
+    done <<EOF
+$selected_list
+EOF
+  fi
+
+  if [ "${#install_targets[@]}" -gt 0 ]; then
+    printf '\n%s\n' "$(yel7 '==> Validate programVersion declarations')"
+    local ver decls
+    for target in "${install_targets[@]+"${install_targets[@]}"}"; do
+      ver=$(_extract_program_version "cmd/$target/main.go")
+      if [ -z "$ver" ]; then
+        printf 'cmd/%s/main.go must declare a non-empty const programVersion string literal\n' "$target" >&2
+        return 1
+      fi
+      decls=$(_count_program_version_declarations "cmd/$target/main.go")
+      if [ "$decls" -ne 1 ]; then
+        printf 'cmd/%s/main.go must declare exactly one programVersion value; found %s declarations\n' \
+          "$target" "$decls" >&2
+        return 1
+      fi
+      if ! _is_strict_stable_semver "$ver"; then
+        printf 'cmd/%s/main.go declares invalid utility version %s; use MAJOR.MINOR.PATCH with no leading zeroes, prerelease, or build metadata\n' \
+          "$target" "$(_go_quote "$ver")" >&2
+        return 1
+      fi
+      install_versions+=("$ver")
+      printf '    %s: programVersion = %s\n' "$(cya4 "cmd/$target")" "$(grn3 "\"$ver\"")"
+    done
+  fi
+
+  _build_install_temps=()
   _build_owned_dir=$(mktemp -d "${TMPDIR:-/tmp}/govna-go-build.XXXXXX") || {
     printf 'build: create owned temporary directory failed\n' >&2
     return 1
   }
-  trap '_cleanup_build_owned' EXIT HUP INT TERM
+  trap '_cleanup_build_owned' EXIT
+  trap '_build_signal_exit 129' HUP
+  trap '_build_signal_exit 130' INT
+  trap '_build_signal_exit 143' TERM
 
   local module_path bin_dir ext
   module_path=$(go list -m -f '{{.Path}}')
@@ -222,8 +352,7 @@ build_run() {
   if [ "${#targets[@]}" -eq 0 ]; then
     scopes=('./...')
   else
-    local t
-    for t in "${targets[@]}"; do scopes+=("./cmd/$t"); done
+    for target in "${install_targets[@]+"${install_targets[@]}"}"; do scopes+=("./cmd/$target"); done
   fi
 
   printf '%s\n' "$(yel7 '==> Check markdown for nested fence issues')"
@@ -286,8 +415,10 @@ build_run() {
   fi
 
   local cover_path
-  cover_path=$(mktemp "${TMPDIR:-/tmp}/build-cover.XXXXXX")
-  trap 'rm -f "${cover_path:-}"; trap - RETURN' RETURN
+  cover_path=$(mktemp "$_build_owned_dir/build-cover.XXXXXX") || {
+    printf 'build: create coverage output failed\n' >&2
+    return 1
+  }
 
   printf '\n%s\n' "$(yel7 '==> Run tests for all packages in the repository')"
   local test_args=(test)
@@ -313,77 +444,44 @@ build_run() {
     printf '    %s\n' 'No issues found by staticcheck.'
   fi
 
-  # Install targets: every cmd/* dir (sorted) when no targets; else the named.
-  local install_targets=()
   if [ "${#targets[@]}" -eq 0 ]; then
-    local d
-    for d in cmd/*/; do
-      [ -d "$d" ] || continue
-      install_targets+=("$(basename "$d")")
-    done
     printf '\n%s\n' "$(yel7 '==> Building all utilities')"
   else
-    install_targets=("${targets[@]}")
-    printf '\n%s %s\n' "$(yel7 '==> Building specific utilities:')" "$(grn3 "${targets[*]}")"
-  fi
-  if [ "${#install_targets[@]}" -gt 0 ]; then
-    local sorted_list
-    sorted_list=$(printf '%s\n' "${install_targets[@]}" | LC_ALL=C sort)
-    install_targets=()
-    local s
-    while IFS= read -r s || [ -n "$s" ]; do
-      [ -n "$s" ] && install_targets+=("$s")
-    done <<EOF
-$sorted_list
-EOF
+    printf '\n%s %s\n' "$(yel7 '==> Building specific utilities:')" "$(grn3 "${install_targets[*]}")"
   fi
 
-  if [ "${#install_targets[@]}" -gt 0 ]; then
-    printf '\n%s\n' "$(yel7 '==> Validate programVersion declarations')"
-    local target ver decls
-    local multi_utility=0
-    local cmd_dir_count=0
-    local cmd_dir
-    for cmd_dir in cmd/*/; do
-      [ -d "$cmd_dir" ] && cmd_dir_count=$((cmd_dir_count + 1))
-    done
-    [ "$cmd_dir_count" -gt 1 ] && multi_utility=1
-    for target in "${install_targets[@]}"; do
-      ver=$(_extract_program_version "cmd/$target/main.go")
-      if [ -z "$ver" ]; then
-        printf 'cmd/%s/main.go must declare a non-empty const programVersion string literal\n' "$target" >&2
-        return 1
-      fi
-      decls=$(_count_program_version_declarations "cmd/$target/main.go")
-      if [ "$decls" -ne 1 ]; then
-        printf 'cmd/%s/main.go must declare exactly one programVersion value; found %s declarations\n' \
-          "$target" "$decls" >&2
-        return 1
-      fi
-      if ! _is_strict_stable_semver "$ver"; then
-        printf 'cmd/%s/main.go declares invalid utility version %s; use MAJOR.MINOR.PATCH with no leading zeroes, prerelease, or build metadata\n' \
-          "$target" "$(_go_quote "$ver")" >&2
-        return 1
-      fi
-      printf '    %s: programVersion = %s\n' "$(cya4 "cmd/$target")" "$(grn3 "\"$ver\"")"
-    done
-  fi
-
-  local target
-  for target in "${install_targets[@]}"; do
-    local output_path="$bin_dir/$target$ext" compiled_path="$_build_owned_dir/$target$ext" install_tmp="$bin_dir/.govna-install-$target-$$$ext"
+  local output_path compiled_path index=0
+  for target in "${install_targets[@]+"${install_targets[@]}"}"; do
+    output_path="$bin_dir/$target$ext"
     if [ -L "$output_path" ] || { [ -e "$output_path" ] && [ ! -f "$output_path" ]; }; then
       printf 'utility %s: installed destination must be absent or a regular file: %s\n' "$target" "$output_path" >&2
       return 1
     fi
-    printf '\n%s %s\n' "$(yel7 '==> Building and validating')" "$(grn3 "$target")"
+  done
+
+  for target in "${install_targets[@]+"${install_targets[@]}"}"; do
+    compiled_path="$_build_owned_dir/$target$ext"
+    printf '\n%s %s\n' "$(yel7 '==> Building')" "$(grn3 "$target")"
     run_streaming grn3 go build -o "$compiled_path" -ldflags '-s -w' "./cmd/$target"
-    _validate_utility_version_output "$compiled_path" "$target" \
-      "$(_extract_program_version "cmd/$target/main.go")" || return 1
-    cp "$compiled_path" "$install_tmp" || { rm -f "$install_tmp"; return 1; }
-    chmod +x "$install_tmp" || { rm -f "$install_tmp"; return 1; }
-    mv -f "$install_tmp" "$output_path" || { rm -f "$install_tmp"; return 1; }
-    printf '    installed: %s\n' "$(cya4 "$output_path")"
+  done
+
+  if [ "${#install_targets[@]}" -gt 0 ]; then
+    printf '\n%s\n' "$(yel7 '==> Validate compiled utility versions')"
+  fi
+  index=0
+  for target in "${install_targets[@]+"${install_targets[@]}"}"; do
+    compiled_path="$_build_owned_dir/$target$ext"
+    _validate_utility_version_output "$compiled_path" "$target" "${install_versions[$index]}" || return 1
+    index=$((index + 1))
+  done
+
+  if [ "${#install_targets[@]}" -gt 0 ]; then
+    printf '\n%s\n' "$(yel7 '==> Install validated utilities')"
+  fi
+  for target in "${install_targets[@]+"${install_targets[@]}"}"; do
+    compiled_path="$_build_owned_dir/$target$ext"
+    output_path="$bin_dir/$target$ext"
+    _install_validated_utility "$compiled_path" "$output_path" "$target" || return 1
   done
 
   local next_tag
@@ -391,7 +489,10 @@ EOF
     printf '\n%s\n\n    ./build.sh %s %s\n' \
       "$(yel7 '==> To release, run:')" "$(grn3 "$next_tag")" "$(gra5 '"<release message>"')"
   fi
-  _cleanup_build_owned
+  if ! _cleanup_build_owned; then
+    trap - EXIT HUP INT TERM
+    return 1
+  fi
   trap - EXIT HUP INT TERM
 }
 
@@ -448,13 +549,25 @@ _extract_program_version() { # $1=main.go path -> version or empty
   printf '%s' "$v"
 }
 
+_extract_template_version() { # $1=version.go path -> version or empty
+  [ -f "$1" ] || { printf ''; return 0; }
+  LC_ALL=C awk '
+    $0 ~ "^[[:space:]]*const[[:space:]]+TemplateVersion[[:space:]]*=[[:space:]]*\"[^\"]*\"[[:space:]]*$" {
+      count++; value=$0; sub(/^.*=[[:space:]]*"/, "", value); sub(/"[[:space:]]*$/, "", value)
+    }
+    $0 ~ "^[[:space:]]*const[[:space:]]+TemplateVersion([^A-Za-z0-9_]|$)" { mentions++ }
+    END { if (count == 1 && mentions == 1 && value != "") print value }
+  ' "$1"
+}
+
 _is_strict_stable_semver() { # $1=version -> success when MAJOR.MINOR.PATCH
   printf '%s' "$1" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 }
 
 _validate_utility_version_output() { # $1=binary $2=utility ID $3=declared version
-  local binary="$1" utility_id="$2" declared="$3" probe_dir rc actual
-  probe_dir=$(mktemp -d "${TMPDIR:-/tmp}/govna-version.XXXXXX") || {
+  local binary="$1" utility_id="$2" declared="$3" probe_root probe_dir rc actual
+  probe_root="${_build_owned_dir:-${TMPDIR:-/tmp}}"
+  probe_dir=$(mktemp -d "$probe_root/govna-version.XXXXXX") || {
     printf 'utility %s: create version probe workspace: check temporary-directory permissions and retry\n' "$utility_id" >&2
     return 1
   }
@@ -485,6 +598,25 @@ _validate_utility_version_output() { # $1=binary $2=utility ID $3=declared versi
   rm -rf "$probe_dir"
 }
 
+_install_validated_utility() { # $1=compiled $2=destination $3=utility ID
+  local compiled="$1" output="$2" utility_id="$3" install_tmp temp_index
+  if [ -L "$output" ] || { [ -e "$output" ] && [ ! -f "$output" ]; }; then
+    printf 'utility %s: installed destination must be absent or a regular file: %s\n' "$utility_id" "$output" >&2
+    return 1
+  fi
+  install_tmp=$(mktemp "$(dirname "$output")/.govna-install-$utility_id.XXXXXX") || {
+    printf 'utility %s: create adjacent installation staging file failed: %s\n' "$utility_id" "$(dirname "$output")" >&2
+    return 1
+  }
+  temp_index=${#_build_install_temps[@]}
+  _build_install_temps[$temp_index]="$install_tmp"
+  cp "$compiled" "$install_tmp" || { rm -f "$install_tmp"; return 1; }
+  chmod 0755 "$install_tmp" || { rm -f "$install_tmp"; return 1; }
+  mv -f "$install_tmp" "$output" || { rm -f "$install_tmp"; return 1; }
+  _build_install_temps[$temp_index]=''
+  printf '    installed: %s\n' "$(cya4 "$output")"
+}
+
 _ensure_staticcheck() { # $1=bin_dir $2=ext -> sets _staticcheck_path; stdout msgs
   # Parity exception (determinism): always install + invoke the pinned version,
   # never PATH's staticcheck, never @latest. go run is rejected (it appends an
@@ -492,7 +624,7 @@ _ensure_staticcheck() { # $1=bin_dir $2=ext -> sets _staticcheck_path; stdout ms
   # match buildtool's step output; the result path is returned via a global so
   # this function is not run inside a command substitution.
   local bin_dir="$1" ext="$2"
-  local pinned='honnef.co/go/tools/cmd/staticcheck@v0.8.0'
+  local pinned='honnef.co/go/tools/cmd/staticcheck@v0.8.1'
   printf '    installing: %s\n' "$(grn3 "$pinned")"
   run_streaming grn3 go install "$pinned"
   _staticcheck_path="$bin_dir/staticcheck$ext"
@@ -667,34 +799,88 @@ _lint_test_naming() {
 rel_usage() {
   printf '%s %s\n' "$(bold "$(whi5 'Usage:')")" 'rel vX.Y.Z "release message"'
   _emit_usage_line '-h, -?, --help' 'show this help'
-  printf '\n%s\n' 'Release message must be 80 characters or fewer.'
+  printf '\n%s\n' 'Release message must be 80 bytes or fewer.'
 }
 
 # rel_run TAG MESSAGE
 rel_run() {
-  local tag="$1" message="$2"
+  local tag="$1" message="$2" rc=0 cleanup_rc=0
+  _build_install_temps=()
+  _build_owned_dir=$(mktemp -d "${TMPDIR:-/tmp}/govna-go-release.XXXXXX") || {
+    _failure 'release: create invocation-owned temporary directory failed'
+    return 1
+  }
+  trap '_cleanup_build_owned' EXIT
+  trap '_release_signal_exit 129' HUP
+  trap '_release_signal_exit 130' INT
+  trap '_release_signal_exit 143' TERM
+  _rel_run_inner "$tag" "$message" || rc=$?
+  _cleanup_build_owned || cleanup_rc=$?
+  trap - EXIT HUP INT TERM
+  [ "$rc" -ne 0 ] && return "$rc"
+  return "$cleanup_rc"
+}
+
+_release_signal_exit() { # $1=conventional signal exit status
+  local status="$1"
+  trap - EXIT HUP INT TERM
+  if ! _cleanup_build_owned; then :; fi
+  exit "$status"
+}
+
+_rel_run_inner() {
+  local tag="$1" message="$2" candidate_tree approved_head retry=0 status
   _rel_tag_for_recovery="$tag"
 
   _ensure_git_repo || return 1
+  _release_validate_prepared "$tag" "$message" || return 1
+  candidate_tree=$(_capture_worktree_tree "$_build_owned_dir/candidate.index") || return 1
+  status=$(git status --porcelain --untracked-files=all 2>/dev/null) || {
+    _failure 'release: inspect index and working tree failed'
+    return 1
+  }
+  approved_head=$(git rev-parse HEAD 2>/dev/null) || {
+    _failure 'release: resolve HEAD failed'
+    return 1
+  }
+  if [ -z "$status" ]; then
+    if [ "$(git show -s --format=%B HEAD 2>/dev/null)" != "$message" ]; then
+      _failure 'release: clean tree is not a retry because the full HEAD commit message differs from the release message'
+      return 1
+    fi
+    retry=1
+  elif [ "$candidate_tree" = "$(git rev-parse 'HEAD^{tree}' 2>/dev/null)" ]; then
+    _failure 'release: no candidate tree changes are available to commit'
+    return 1
+  fi
 
   printf '%s %s\n' "$(yel7 'release tag:')" "$(grn3 "$tag")"
   printf '%s %s\n' "$(yel7 'release message:')" "$(grn3 "$(_go_quote "$message")")"
   printf '%s %s\n' "$(yel7 'remote:')" "$(cya4 'origin')"
+  if [ "$retry" -eq 1 ]; then
+    printf '%s\n' "$(yel7 "$(printf '\nRetry commit files:')")"
+    git diff-tree --no-commit-id --name-status -r HEAD || return 1
+  else
+    printf '%s\n' "$(yel7 "$(printf '\nCandidate tree files:')")"
+    git diff --name-status HEAD "$candidate_tree" || return 1
+  fi
 
-  printf '%s\n' "$(yel7 "$(printf '\nFiles that will be staged (git status):')")"
-  _run_git 'git status preview' status --short || {
-    printf '%s\n' "$_git_err" >&2
-    return 1
-  }
-
-  printf '%s\n' "$(yel7 "$(printf '\nplan:')")"
-  printf '%s\n' '- git add .'
-  printf -- '- git commit -m %s\n' "$(_go_quote "$message")"
+  printf '%s\n' "$(yel7 "$(printf '\nrelease sequence:')")"
+  if [ "$retry" -eq 1 ]; then
+    printf '%s\n' '- reuse the displayed clean HEAD commit'
+  else
+    printf '%s\n' '- git add -A and verify the staged tree'
+    printf -- '- git commit -m %s and verify the committed tree\n' "$(_go_quote "$message")"
+  fi
+  printf '%s\n' '- validate every utility declaration'
+  printf '%s\n' '- compile each utility once from clean committed HEAD'
+  printf '%s\n' '- validate every compiled utility version and provenance'
+  printf '%s\n' '- atomically install every validated utility and recheck it'
   printf '%s\n' "- git tag $tag"
   printf '%s\n' "- git push origin $tag"
   printf '%s\n' '- git push origin'
 
-  printf '%s' "$(yel7 'Review the file list above. Proceed with release? (y/N): ')"
+  printf '%s' "$(yel7 'Review the file list and sequence above. Proceed with release? (y/N): ')"
   local answer=''
   IFS= read -r answer || true
   case "$answer" in
@@ -705,18 +891,232 @@ rel_run() {
     ;;
   esac
 
-  local completed=''
-  _rel_step 'git add' "$completed" add . || return 1
-  completed='git add'
-  # The commit uses the raw, unquoted message bytes (only the display/plan/error
-  # surfaces above use _go_quote); the committed message is byte-for-byte $message.
-  _rel_step 'git commit' "$completed" commit -m "$message" || return 1
-  completed='git add, git commit'
+  local current_tree completed=''
+  if [ "$retry" -eq 1 ]; then
+    [ -z "$(git status --porcelain --untracked-files=all 2>/dev/null)" ] || {
+      _failure 'release: retry tree changed after approval'
+      return 1
+    }
+    [ "$(git rev-parse HEAD 2>/dev/null)" = "$approved_head" ] || {
+      _failure 'release: retry HEAD changed after approval'
+      return 1
+    }
+    [ "$(git show -s --format=%B HEAD 2>/dev/null)" = "$message" ] || {
+      _failure 'release: retry commit message changed after approval'
+      return 1
+    }
+    _release_validate_prepared "$tag" "$message" || return 1
+    completed='git commit (retry)'
+  else
+    current_tree=$(_capture_worktree_tree "$_build_owned_dir/recheck.index") || return 1
+    [ "$current_tree" = "$candidate_tree" ] || {
+      _failure 'release: candidate tree changed after approval; nothing was staged'
+      return 1
+    }
+    _rel_step 'git add' "$completed" add -A -- . || return 1
+    completed='git add'
+    [ "$(git write-tree 2>/dev/null)" = "$candidate_tree" ] || {
+      _failure 'release: staged tree differs from the approved candidate; inspect the index before retrying'
+      return 1
+    }
+    _rel_step 'git commit' "$completed" commit -m "$message" || return 1
+    completed='git add, git commit'
+    _verify_release_commit "$candidate_tree" "$message" || return 1
+  fi
+
+  _release_compile_validate_install "$tag" || {
+    _failure 'release: utility compilation, validation, or installation failed; no tag or push was attempted'
+    _failure 'recovery: fix the reported problem and rerun the same two-argument release command'
+    return 1
+  }
+  completed="$completed, release compilation and installation"
   _rel_step 'git tag' "$completed" tag "$tag" || return 1
-  completed='git add, git commit, git tag'
+  completed="$completed, git tag"
+  [ "$(git rev-parse "$tag^{commit}" 2>/dev/null)" = "$(git rev-parse HEAD 2>/dev/null)" ] || {
+    _failure 'release: created tag does not identify verified HEAD; push was not attempted'
+    return 1
+  }
   _rel_step 'git push tag' "$completed" push origin "$tag" || return 1
-  completed='git add, git commit, git tag, git push tag'
+  completed="$completed, git push tag"
   _rel_step 'git push branch' "$completed" push origin || return 1
+}
+
+_capture_worktree_tree() { # $1=temporary index path $2=error prefix (optional)
+  local index="$1" prefix="${2:-release}" tree
+  rm -f -- "$index"
+  GIT_INDEX_FILE="$index" git read-tree HEAD >/dev/null 2>&1 || {
+    _failure "$prefix: initialize temporary candidate index failed"
+    return 1
+  }
+  GIT_INDEX_FILE="$index" git add -A -- . >/dev/null 2>&1 || {
+    _failure "$prefix: capture candidate files in temporary index failed"
+    return 1
+  }
+  tree=$(GIT_INDEX_FILE="$index" git write-tree 2>/dev/null) || {
+    _failure "$prefix: write candidate tree failed"
+    return 1
+  }
+  printf '%s' "$tree"
+}
+
+_verify_release_commit() { # $1=approved tree $2=message
+  local approved_tree="$1" message="$2" committed_tree
+  committed_tree=$(git rev-parse 'HEAD^{tree}' 2>/dev/null) || {
+    _failure 'release: resolve committed tree failed'
+    return 1
+  }
+  [ "$committed_tree" = "$approved_tree" ] || {
+    _failure 'release: new commit differs from the approved candidate tree'
+    return 1
+  }
+  [ "$(git show -s --format=%B HEAD 2>/dev/null)" = "$message" ] || {
+    _failure 'release: new commit message differs from the approved release message'
+    return 1
+  }
+  [ -z "$(git status --porcelain --untracked-files=all 2>/dev/null)" ] || {
+    _failure 'release: working tree is not clean after commit'
+    return 1
+  }
+}
+
+_release_validate_prepared() { # $1=tag $2=message
+  local tag="$1" message="$2" version="${1#v}" root="$PWD" path kind actual cmd_dir decls
+  [ "$tag" = "v$version" ] && _is_strict_stable_semver "$version" || {
+    _failure "release: tag must use strict stable SemVer: $(_go_quote "$tag")"
+    return 1
+  }
+  _validate_release_message release "$message" || return 1
+  if git rev-parse -q --verify "refs/tags/$tag" >/dev/null 2>&1; then
+    _failure "release: tag $tag already exists"
+    return 1
+  fi
+  _prep_detect_version_targets "$root"
+  _prep_validate_multi_utility_versions "$root" || return 1
+  while IFS="$(printf '\t')" read -r path kind; do
+    [ -n "$path" ] || continue
+    case "$kind" in
+    programVersion) actual=$(_extract_program_version "$path") ;;
+    TemplateVersion) actual=$(_extract_template_version "$path") ;;
+    *) actual='' ;;
+    esac
+    [ "$actual" = "$version" ] || {
+      _failure "release: prepared $kind in $path is $(_go_quote "$actual"); require $(_go_quote "$version")"
+      return 1
+    }
+  done <<EOF
+$_prep_vtargets
+EOF
+  _validate_prepared_changelogs "$root" "$version" "$message" || return 1
+}
+
+_validate_binary_provenance() { # $1=binary $2=revision $3=label
+  local binary="$1" revision="$2" label="$3" info
+  info=$(go version -m "$binary" 2>/dev/null) || {
+    _failure "release: read $label Go build information failed"
+    return 1
+  }
+  printf '%s\n' "$info" | grep -Fq "vcs.revision=$revision" || {
+    _failure "release: $label does not identify committed HEAD"
+    return 1
+  }
+  printf '%s\n' "$info" | grep -Fq 'vcs.modified=false' || {
+    _failure "release: $label build information is dirty"
+    return 1
+  }
+}
+
+_release_compile_validate_install() { # $1=tag
+  local tag="$1" release_version="${1#v}" revision bin_dir ext d target version decls compiled output
+  local targets=() versions=()
+  for d in cmd/*/; do
+    [ -f "${d}main.go" ] || continue
+    targets+=("$(basename "$d")")
+  done
+  [ "${#targets[@]}" -gt 0 ] || {
+    _failure 'release: no cmd/<target>/main.go utilities were discovered'
+    return 1
+  }
+  local sorted
+  sorted=$(printf '%s\n' "${targets[@]}" | LC_ALL=C sort)
+  targets=()
+  while IFS= read -r target || [ -n "$target" ]; do
+    [ -n "$target" ] && targets+=("$target")
+  done <<EOF
+$sorted
+EOF
+
+  printf '\n%s\n' "$(yel7 '==> Validate release utility declarations')"
+  _prep_detect_version_targets "$PWD"
+  for target in "${targets[@]}"; do
+    decls=$(_count_program_version_declarations "cmd/$target/main.go")
+    version=$(_extract_program_version "cmd/$target/main.go")
+    if [ "$decls" -ne 1 ] || [ -z "$version" ] || ! _is_strict_stable_semver "$version"; then
+      _failure "release: cmd/$target/main.go must declare exactly one strict stable SemVer programVersion"
+      return 1
+    fi
+    if printf '%s\n' "$_prep_vtargets" | cut -f1 | grep -Fxq "$PWD/cmd/$target/main.go" && [ "$version" != "$release_version" ]; then
+      _failure "release: prep-changed utility $target version $version does not match $release_version"
+      return 1
+    fi
+    versions+=("$version")
+    printf '    %s: programVersion = %s\n' "$(cya4 "cmd/$target")" "$(grn3 "\"$version\"")"
+  done
+
+  revision=$(git rev-parse HEAD 2>/dev/null) || {
+    _failure 'release: resolve committed HEAD failed'
+    return 1
+  }
+  [ -z "$(git status --porcelain --untracked-files=all 2>/dev/null)" ] || {
+    _failure 'release: require clean committed HEAD before compilation'
+    return 1
+  }
+  bin_dir="$(go env GOPATH)/bin" || {
+    _failure 'release: resolve GOPATH failed'
+    return 1
+  }
+  ext=$(go env GOEXE) || {
+    _failure 'release: resolve GOEXE failed'
+    return 1
+  }
+
+  printf '\n%s\n' "$(yel7 '==> Compile release utilities')"
+  local i=0
+  for target in "${targets[@]}"; do
+    compiled="$_build_owned_dir/$target$ext"
+    run_streaming grn3 go build -mod=readonly -buildvcs=true -o "$compiled" -ldflags '-s -w' "./cmd/$target" || return 1
+  done
+
+  printf '\n%s\n' "$(yel7 '==> Validate compiled release utilities')"
+  for target in "${targets[@]}"; do
+    version="${versions[$i]}"
+    compiled="$_build_owned_dir/$target$ext"
+    _validate_utility_version_output "$compiled" "$target" "$version" || return 1
+    _validate_binary_provenance "$compiled" "$revision" "compiled $target" || return 1
+    printf '    verified: %s\n' "$(cya4 "$target")"
+    i=$((i + 1))
+  done
+
+  mkdir -p "$bin_dir" || {
+    _failure "release: create install directory failed: $bin_dir"
+    return 1
+  }
+  printf '\n%s\n' "$(yel7 '==> Install validated release utilities')"
+  for target in "${targets[@]}"; do
+    compiled="$_build_owned_dir/$target$ext"
+    output="$bin_dir/$target$ext"
+    _install_validated_utility "$compiled" "$output" "$target" || return 1
+  done
+
+  printf '\n%s\n' "$(yel7 '==> Recheck installed release utilities')"
+  i=0
+  for target in "${targets[@]}"; do
+    version="${versions[$i]}"
+    output="$bin_dir/$target$ext"
+    _validate_utility_version_output "$output" "$target" "$version" || return 1
+    _validate_binary_provenance "$output" "$revision" "installed $target" || return 1
+    printf '    verified installed: %s\n' "$(cya4 "$output")"
+    i=$((i + 1))
+  done
 }
 
 # _rel_step NAME COMPLETED gitargs... — run one git step; on failure emit the
@@ -748,6 +1148,14 @@ _recovery_error() {
     printf '\nrecovery: tag %s exists locally but was not pushed\n' "$tag"
     printf '  to retry push: git push origin %s && git push origin\n' "$tag"
     printf '  to remove tag: git tag -d %s\n' "$tag"
+    ;;
+  *"git commit"*)
+    printf '\nrecovery: the approved release commit exists without tag %s\n' "$tag"
+    printf '  fix the reported problem, then rerun the same two-argument release command\n'
+    ;;
+  *"git add"*)
+    printf '\nrecovery: the repository index may contain the approved candidate\n'
+    printf '  inspect the index and working tree before retrying the release command\n'
     ;;
   esac
 }
@@ -789,40 +1197,62 @@ prep_usage() {
 prep vX.Y.Z "release message" [options]
 
 Stages a release by bumping version constants, inserting a CHANGELOG row,
-deleting completed AC files, and running validation builds before and after.
+deleting completed AC files, and removing matching plan.md pointers.
 
 Flags:
   -h, -?, --help   show this help
   --dry-run, -n    print intended writes without modifying the working tree
-  --no-build, -B   unsupported for Go prep; canonical validation is mandatory
-  -v, --verbose    print detailed prep phase commands
 
 Prints the canonical release command on success. Does not run the release
 itself — present the printed command for the director to run.
+
+Release message must be 80 bytes or fewer.
+Release message must be one table-safe line.
 EOF
 }
 
-# prep_run DRY NOBUILD VERBOSE VERSION MESSAGE.
+# prep_run DRY VERSION MESSAGE.
 prep_run() {
-  local dry="$1" nobuild="$2" verbose="$3" version="$4" message="$5"
+  local dry="$1" version="$2" message="$3" rc=0 cleanup_rc=0
+  _prep_owned_dir=$(mktemp -d "${TMPDIR:-/tmp}/govna-go-prep.XXXXXX") || {
+    printf 'prep: create invocation-owned temporary directory failed\n' >&2
+    return 1
+  }
+  trap '_cleanup_prep_owned' EXIT
+  trap '_prep_signal_exit 129' HUP
+  trap '_prep_signal_exit 130' INT
+  trap '_prep_signal_exit 143' TERM
+  _prep_run_inner "$dry" "$version" "$message" || rc=$?
+  _cleanup_prep_owned || cleanup_rc=$?
+  trap - EXIT HUP INT TERM
+  [ "$rc" -ne 0 ] && return "$rc"
+  return "$cleanup_rc"
+}
+
+_cleanup_prep_owned() {
+  local path="$_prep_owned_dir"
+  _prep_owned_dir=''
+  [ -z "$path" ] || [ ! -d "$path" ] || rm -rf -- "$path"
+}
+
+_prep_signal_exit() { # $1=conventional signal exit status
+  local status="$1"
+  trap - EXIT HUP INT TERM
+  if ! _cleanup_prep_owned; then :; fi
+  exit "$status"
+}
+
+_prep_run_inner() {
+  local dry="$1" version="$2" message="$3"
   local root="$PWD"
   local vstripped="${version#v}"
 
-  # Phase 1: validate inputs (errors wrap as "prep: …", exit 1).
-  if ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-    printf 'prep: version must match vMAJOR.MINOR.PATCH: %s\n' "$(_go_quote "$version")" >&2
+  # Phase 1: validate inputs.
+  if ! _is_strict_stable_semver "$vstripped" || [ "$version" != "v$vstripped" ]; then
+    printf 'prep: version must match strict vMAJOR.MINOR.PATCH: %s\n' "$(_go_quote "$version")" >&2
     return 1
   fi
-  if [ -z "$message" ]; then
-    printf 'prep: message must be non-empty\n' >&2
-    return 1
-  fi
-  local mlen
-  mlen=$(_byte_len "$message")
-  if [ "$mlen" -gt 80 ]; then
-    printf 'prep: message must be 80 characters or fewer (got %d)\n' "$mlen" >&2
-    return 1
-  fi
+  _validate_release_message prep "$message" || return 1
 
   # Phase 2: validate git state.
   _prep_validate_git_state "$root" "$version" || return 1
@@ -831,29 +1261,16 @@ prep_run() {
     printf 'prep: validation-token environment evidence is unsupported for Go\n' >&2
     return 1
   fi
-  if [ "$nobuild" -eq 1 ] && [ "$dry" -ne 1 ]; then
-    printf 'prep: --no-build is unsupported for Go; canonical validation is mandatory\n' >&2
-    return 1
-  fi
 
-  # Phase 3: mandatory pre-check build for an actual prep.
-  if [ "$dry" -ne 1 ]; then
-    printf 'prep: running pre-check build\n'
-    [ "$verbose" -eq 1 ] && printf 'prep: command: ./build.sh\n'
-    _prep_build "$root" || {
-      printf 'prep: pre-check build: %s\n' "$_prep_build_err" >&2
-      return 1
-    }
-  fi
-
-  # Phase 4: detect version targets (+ warning). Called directly (not in a
+  # Phase 3: detect version targets (+ warning). Called directly (not in a
   # command substitution) so the _prep_warning/_prep_vtargets globals propagate.
   _prep_detect_version_targets "$root"
-  _prep_validate_multi_utility_versions "$root" "$nobuild" || return 1
+  _prep_validate_multi_utility_versions "$root" || return 1
   local vtargets="$_prep_vtargets"
   [ -n "$_prep_warning" ] && printf '%s\n' "$_prep_warning"
+  _prep_validate_version_plan "$vtargets" "$vstripped" || return 1
 
-  # Phase 5: detect CHANGELOG targets (+ idempotency guard). Direct call so
+  # Phase 4: detect CHANGELOG targets (+ idempotency guard). Direct call so
   # _prep_cl_err/_prep_ctargets propagate.
   _prep_detect_changelog_targets "$root" "$version" || {
     printf 'prep: detect CHANGELOG targets: %s\n' "$_prep_cl_err" >&2
@@ -861,18 +1278,25 @@ prep_run() {
   }
   local ctargets="$_prep_ctargets"
 
-  # Phase 6: parse AC refs from the message and locate files.
+  # Phase 5: parse AC refs and require one selected AC file per unique ref.
   local acnums acfiles
   acnums=$(_prep_parse_ac_refs "$message")
   acfiles=$(_prep_find_ac_files "$root" "$acnums")
+  _prep_validate_ac_selection "$root" "$acnums" "$acfiles" || return 1
+  local ielines
+  ielines=$(_prep_find_ie_lines "$root" "$acnums")
 
   if [ "$dry" -eq 1 ]; then
-    local ielines
-    ielines=$(_prep_find_ie_lines "$root" "$acnums")
     _prep_print_dry_run "$vtargets" "$ctargets" "$vstripped" "$message" "$acfiles" "$ielines"
     _prep_emit_release_command "$version" "$message"
     return 0
   fi
+
+  # Phase 6: capture the pre-write tree and the exact planned path set.
+  local before_tree after_tree expected_paths actual_paths
+  before_tree=$(_capture_worktree_tree "$_prep_owned_dir/before.index" prep) || return 1
+  expected_paths=$(_prep_expected_paths "$root" "$vtargets" "$ctargets" "$acfiles" "$ielines")
+  _prep_prepare_expected_files "$root" "$vtargets" "$ctargets" "$vstripped" "$message" "$ielines" || return 1
 
   # Phase 7a: apply version bumps.
   local path kind
@@ -910,8 +1334,6 @@ $acfiles
 EOF
 
   # Phase 7d: sweep AC-pointer IE lines from plan.md.
-  local ielines
-  ielines=$(_prep_find_ie_lines "$root" "$acnums")
   _prep_remove_ie_lines "$root" "$ielines" || {
     printf 'prep: sweep plan.md AC-pointer IEs: %s\n' "$_prep_ie_err" >&2
     return 1
@@ -924,13 +1346,19 @@ EOF
 $ielines
 EOF
 
-  # Phase 8: post-check build.
-  printf 'prep: running post-check build\n'
-  [ "$verbose" -eq 1 ] && printf 'prep: command: ./build.sh\n'
-  _prep_build "$root" || {
-    printf 'prep: post-check build: %s\n' "$_prep_build_err" >&2
+  # Phase 8: reject every result outside the planned transformations.
+  after_tree=$(_capture_worktree_tree "$_prep_owned_dir/after.index" prep) || return 1
+  actual_paths=$(git diff --name-only "$before_tree" "$after_tree" 2>/dev/null) || {
+    printf 'prep: compare planned and resulting trees failed\n' >&2
     return 1
   }
+  if [ "$actual_paths" != "$expected_paths" ]; then
+    printf 'prep: resulting paths differ from the planned transformations\nplanned:\n%s\nresult:\n%s\n' \
+      "$expected_paths" "$actual_paths" >&2
+    return 1
+  fi
+  _prep_verify_expected_files "$root" "$vtargets" "$ctargets" "$ielines" || return 1
+  _prep_verify_result "$root" "$vtargets" "$ctargets" "$vstripped" "$message" "$acfiles" "$ielines" || return 1
 
   # Phase 9: emit release command.
   _prep_emit_release_command "$version" "$message"
@@ -1066,8 +1494,8 @@ _count_program_version_declarations() { # $1=main.go path -> declaration count
     END { print count+0 }' "$1"
 }
 
-_prep_validate_multi_utility_versions() { # $1=root $2=no-build flag
-  local root="$1" nobuild="$2" cmd_dir mainp count=0 version decls
+_prep_validate_multi_utility_versions() { # $1=root
+  local root="$1" cmd_dir mainp count=0 version decls
   for cmd_dir in "$root"/cmd/*/; do
     [ -d "$cmd_dir" ] || continue
     [ -f "$cmd_dir/main.go" ] || continue
@@ -1092,6 +1520,38 @@ _prep_validate_multi_utility_versions() { # $1=root $2=no-build flag
   done
 }
 
+_prep_validate_version_plan() { # $1=targets $2=requested version
+  local targets="$1" requested="$2" path kind current tab
+  tab=$(printf '\t')
+  while IFS="$tab" read -r path kind; do
+    [ -n "$path" ] || continue
+    case "$kind" in
+    programVersion)
+      if [ "$(_count_program_version_declarations "$path")" -ne 1 ]; then
+        printf 'prep: %s must contain exactly one programVersion declaration\n' "$path" >&2
+        return 1
+      fi
+      current=$(_extract_program_version "$path")
+      ;;
+    TemplateVersion) current=$(_extract_template_version "$path") ;;
+    *)
+      printf 'prep: unknown version target kind: %s\n' "$kind" >&2
+      return 1
+      ;;
+    esac
+    if ! _is_strict_stable_semver "$current"; then
+      printf 'prep: %s has invalid %s %s; require strict stable SemVer\n' "$path" "$kind" "$(_go_quote "$current")" >&2
+      return 1
+    fi
+    if [ "$current" = "$requested" ]; then
+      printf 'prep: %s %s already equals requested version %s\n' "$path" "$kind" "$requested" >&2
+      return 1
+    fi
+  done <<EOF
+$targets
+EOF
+}
+
 _join_comma_space() {
   local out='' a
   for a in "$@"; do
@@ -1104,17 +1564,69 @@ _prep_detect_changelog_targets() { # $1=root $2=version -> sets _prep_ctargets/_
   local root="$1" version="$2" vstripped="${2#v}"
   _prep_cl_err=''
   _prep_ctargets=''
-  local marker="| $vstripped |" p out=''
+  local p out='' count
   for p in "$root/CHANGELOG.md" "$root/internal/templates/CHANGELOG.md"; do
     [ -f "$p" ] || continue
-    if grep -Fq "$marker" "$p"; then
+    _validate_changelog_shape "$p" || return 1
+    count=$(LC_ALL=C awk -F'|' -v version="$vstripped" '
+      { value=$2; gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); if (value == version) count++ }
+      END { print count+0 }' "$p")
+    if [ "$count" -ne 0 ]; then
       _prep_cl_err="$p already has a row for $vstripped (prep is not idempotent on CHANGELOG)"
       return 1
     fi
     if [ -z "$out" ]; then out="$p"; else out="$out
 $p"; fi
   done
+  if [ -z "$out" ]; then
+    _prep_cl_err='no canonical CHANGELOG.md target was found'
+    return 1
+  fi
   _prep_ctargets="$out"
+}
+
+_validate_changelog_shape() { # $1=path
+  local path="$1"
+  LC_ALL=C awk '
+    NR == 1 && $0 != "# Changelog" { bad=1 }
+    NR == 2 && $0 != "" { bad=1 }
+    NR == 3 && $0 != "| Version | Summary |" { bad=1 }
+    NR == 4 && $0 != "|---------|---------|" { bad=1 }
+    NR == 5 && $0 != "| Unreleased | |" { bad=1 }
+    NR >= 5 && $0 !~ /^\| [^|]+ \|(\\\||[^|])*\|$/ { bad=1 }
+    END { if (NR < 5 || bad) exit 1 }
+  ' "$path" || {
+    _prep_cl_err="$path does not use the canonical changelog heading and two-column table shape"
+    return 1
+  }
+}
+
+_validate_changelog_release_row() { # $1=path $2=version $3=message
+  local path="$1" row="| $2 | $3 |"
+  _validate_changelog_shape "$path" || return 1
+  LC_ALL=C awk -v row="$row" '
+    $0 == row { count++; if (NR == 6) immediate=1 }
+    END { if (count != 1 || !immediate) exit 1 }
+  ' "$path" || {
+    _prep_cl_err="$path must contain one exact release row immediately after Unreleased"
+    return 1
+  }
+}
+
+_validate_prepared_changelogs() { # $1=root $2=version $3=message
+  local root="$1" version="$2" message="$3" path found=0
+  for path in "$root/CHANGELOG.md" "$root/internal/templates/CHANGELOG.md"; do
+    [ -f "$path" ] || continue
+    found=1
+    _validate_changelog_release_row "$path" "$version" "$message" || {
+      printf 'release: %s\n' "$_prep_cl_err" >&2
+      return 1
+    }
+  done
+  [ "$found" -eq 1 ] || {
+    _failure 'release: no canonical CHANGELOG.md target was found'
+    return 1
+  }
 }
 
 _prep_parse_ac_refs() { # $1=message -> sorted unique AC numbers, one per line
@@ -1137,6 +1649,31 @@ _prep_find_ac_files() { # $1=root $2=acnums -> sorted govna/ac<N>-*.md paths
       printf '%s\n' "$f"
     fi
   done | LC_ALL=C sort
+}
+
+_prep_validate_ac_selection() { # $1=root $2=acnums $3=acfiles
+  local root="$1" acnums="$2" acfiles="$3" number count path name
+  if [ -z "$acnums" ]; then
+    printf 'prep: release message must name at least one AC<number> reference\n' >&2
+    return 1
+  fi
+  while IFS= read -r number; do
+    [ -n "$number" ] || continue
+    count=0
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      name=$(basename "$path")
+      case "$name" in ac"$number"-*.md) count=$((count + 1)) ;; esac
+    done <<EOF
+$acfiles
+EOF
+    if [ "$count" -ne 1 ]; then
+      printf 'prep: AC%s must select exactly one govna/ac%s-*.md file; found %d\n' "$number" "$number" "$count" >&2
+      return 1
+    fi
+  done <<EOF
+$acnums
+EOF
 }
 
 _prep_find_ie_lines() { # $1=root $2=acnums -> matching plan.md lines
@@ -1171,6 +1708,135 @@ _prep_remove_ie_lines() { # $1=root $2=ielines(newline-sep)
   rm -f "$tmp"
 }
 
+_prep_expected_paths() { # root vtargets ctargets acfiles ielines
+  local root="$1" vtargets="$2" ctargets="$3" acfiles="$4" ielines="$5" path kind tab
+  tab=$(printf '\t')
+  {
+    while IFS="$tab" read -r path kind; do
+      [ -n "$path" ] && printf '%s\n' "${path#"$root"/}"
+    done <<EOF
+$vtargets
+EOF
+    while IFS= read -r path; do
+      [ -n "$path" ] && printf '%s\n' "${path#"$root"/}"
+    done <<EOF
+$ctargets
+EOF
+    while IFS= read -r path; do
+      [ -n "$path" ] && printf '%s\n' "${path#"$root"/}"
+    done <<EOF
+$acfiles
+EOF
+    [ -z "$ielines" ] || printf '%s\n' 'plan.md'
+  } | LC_ALL=C sort -u
+}
+
+_prep_prepare_expected_files() { # root vtargets ctargets version message ielines
+  local root="$1" vtargets="$2" ctargets="$3" version="$4" message="$5" ielines="$6"
+  local expected_root="$_prep_owned_dir/expected" path kind relative tab
+  tab=$(printf '\t')
+  while IFS="$tab" read -r path kind; do
+    [ -n "$path" ] || continue
+    relative="${path#"$root"/}"
+    mkdir -p "$expected_root/$(dirname "$relative")" || return 1
+    cp "$path" "$expected_root/$relative" || return 1
+    _prep_apply_version_bump "$expected_root/$relative" "$kind" "$version" || return 1
+  done <<EOF
+$vtargets
+EOF
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    relative="${path#"$root"/}"
+    mkdir -p "$expected_root/$(dirname "$relative")" || return 1
+    cp "$path" "$expected_root/$relative" || return 1
+    _prep_apply_changelog_insert "$expected_root/$relative" "$version" "$message" || return 1
+  done <<EOF
+$ctargets
+EOF
+  if [ -n "$ielines" ]; then
+    mkdir -p "$expected_root" || return 1
+    cp "$root/plan.md" "$expected_root/plan.md" || return 1
+    _prep_remove_ie_lines "$expected_root" "$ielines" || return 1
+  fi
+}
+
+_prep_verify_expected_files() { # root vtargets ctargets ielines
+  local root="$1" vtargets="$2" ctargets="$3" ielines="$4"
+  local expected_root="$_prep_owned_dir/expected" path kind relative tab
+  tab=$(printf '\t')
+  while IFS="$tab" read -r path kind; do
+    [ -n "$path" ] || continue
+    relative="${path#"$root"/}"
+    cmp -s "$expected_root/$relative" "$path" || {
+      printf 'prep: %s differs from its planned version transformation\n' "$relative" >&2
+      return 1
+    }
+  done <<EOF
+$vtargets
+EOF
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    relative="${path#"$root"/}"
+    cmp -s "$expected_root/$relative" "$path" || {
+      printf 'prep: %s differs from its planned changelog transformation\n' "$relative" >&2
+      return 1
+    }
+  done <<EOF
+$ctargets
+EOF
+  if [ -n "$ielines" ] && ! cmp -s "$expected_root/plan.md" "$root/plan.md"; then
+    printf 'prep: plan.md differs from its planned pointer removals\n' >&2
+    return 1
+  fi
+}
+
+_prep_verify_result() { # root vtargets ctargets version message acfiles ielines
+  local root="$1" vtargets="$2" ctargets="$3" version="$4" message="$5" acfiles="$6" ielines="$7"
+  local path kind actual line tab
+  tab=$(printf '\t')
+  while IFS="$tab" read -r path kind; do
+    [ -n "$path" ] || continue
+    case "$kind" in
+    programVersion) actual=$(_extract_program_version "$path") ;;
+    TemplateVersion) actual=$(_extract_template_version "$path") ;;
+    *) actual='' ;;
+    esac
+    if [ "$actual" != "$version" ] || ! _is_strict_stable_semver "$actual"; then
+      printf 'prep: resulting %s in %s does not equal strict version %s\n' "$kind" "$path" "$version" >&2
+      return 1
+    fi
+  done <<EOF
+$vtargets
+EOF
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    _validate_changelog_release_row "$path" "$version" "$message" || {
+      printf 'prep: %s\n' "$_prep_cl_err" >&2
+      return 1
+    }
+  done <<EOF
+$ctargets
+EOF
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if [ -e "$path" ] || [ -L "$path" ]; then
+      printf 'prep: planned AC deletion remains: %s\n' "$path" >&2
+      return 1
+    fi
+  done <<EOF
+$acfiles
+EOF
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    if [ -f "$root/plan.md" ] && grep -Fqx "$line" "$root/plan.md"; then
+      printf 'prep: planned plan.md pointer remains: %s\n' "$(_trim "$line")" >&2
+      return 1
+    fi
+  done <<EOF
+$ielines
+EOF
+}
+
 _prep_apply_version_bump() { # $1=path $2=kind $3=vstripped
   local path="$1" kind="$2" v="$3"
   _prep_bump_err=''
@@ -1198,10 +1864,7 @@ _prep_apply_version_bump() { # $1=path $2=kind $3=vstripped
 
 _prep_apply_changelog_insert() { # $1=path $2=vstripped $3=message
   local path="$1" v="$2" msg="$3"
-  if ! grep -Eq '^\| Unreleased \|' "$path"; then
-    _prep_cl_err="$path has no | Unreleased | row"
-    return 1
-  fi
+  _validate_changelog_shape "$path" || return 1
   local tmp row
   tmp=$(mktemp "${TMPDIR:-/tmp}/prep-cl.XXXXXX")
   row="| $v | $msg |"
@@ -1217,7 +1880,7 @@ _prep_apply_changelog_insert() { # $1=path $2=vstripped $3=message
 }
 
 _prep_emit_release_command() { # $1=version $2=message
-  printf '\nrelease command:\n  ./build.sh %s %s\n' "$1" "$(_go_quote "$2")"
+  printf '\nrelease command:\n  ./build.sh %s %s\n' "$1" "$(_shell_quote "$2")"
 }
 
 _prep_print_dry_run() { # vtargets ctargets vstripped message acfiles ielines
@@ -1250,15 +1913,6 @@ EOF
 $ielines
 EOF
   printf -- '--- end dry run ---\n'
-}
-
-_prep_build() { # $1=root -> runs ./build.sh; sets _prep_build_err on failure
-  local root="$1" rc=0
-  (cd "$root" && ./build.sh 2>&1) || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    _prep_build_err="build.sh: exit status $rc"
-    return 1
-  fi
 }
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1313,39 +1967,24 @@ rel_main() {
   if [ "$#" -eq 1 ]; then
     case "$1" in -h | -\? | --help) rel_usage; return 0 ;; esac
   fi
-  local a
-  for a in "$@"; do
-    case "$a" in
-    -h | -\? | --help)
-      printf 'help flags must be used by themselves\n' >&2
-      return 2
-      ;;
-    -*)
-      printf 'unsupported option %s; use positional args or -h, -?, --help\n' "$(_go_quote "$a")" >&2
-      return 2
-      ;;
-    esac
-  done
   if [ "$#" -ne 2 ]; then
     printf 'usage: rel vX.Y.Z "release message"\n' >&2
     return 2
   fi
-  # Trim both args (mirrors reltool.ParseArgs strings.TrimSpace) before validating.
   local tag message
-  tag=$(_trim "$1")
-  message=$(_trim "$2")
-  if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-    printf 'release tag must match vMAJOR.MINOR.PATCH: %s\n' "$(_go_quote "$tag")" >&2
+  tag="$1"
+  message="$2"
+  case "$tag" in
+  -*)
+    printf 'unsupported option %s; use positional args or -h, -?, --help\n' "$(_go_quote "$tag")" >&2
+    return 2
+    ;;
+  esac
+  if [ "$tag" != "v${tag#v}" ] || ! _is_strict_stable_semver "${tag#v}"; then
+    printf 'release tag must match strict vMAJOR.MINOR.PATCH: %s\n' "$(_go_quote "$tag")" >&2
     return 2
   fi
-  if [ -z "$message" ]; then
-    printf 'release message must be non-empty\n' >&2
-    return 2
-  fi
-  if [ "$(_byte_len "$message")" -gt 80 ]; then
-    printf 'release message must be 80 characters or fewer\n' >&2
-    return 2
-  fi
+  _validate_release_message release "$message" || return 2
 
   rel_run "$tag" "$message" || return 1
 
@@ -1357,7 +1996,7 @@ prep_main() {
   if [ "$#" -eq 1 ]; then
     case "$1" in -h | -\? | --help) prep_usage; return 0 ;; esac
   fi
-  local dry=0 nobuild=0 verbose=0
+  local dry=0
   local positional=()
   local arg
   while [ "$#" -gt 0 ]; do
@@ -1367,10 +2006,8 @@ prep_main() {
     -h | -\? | --help)
       printf 'help flags must be used by themselves\n' >&2
       return 2
-      ;;
+    ;;
     --dry-run | -n) dry=1 ;;
-    --no-build | -B) nobuild=1 ;;
-    -v | --verbose) verbose=1 ;;
     -t | --validation-token)
       printf 'prep: validation-token options are unsupported for Go\n' >&2
       return 2
@@ -1383,13 +2020,13 @@ prep_main() {
     esac
   done
   if [ "${#positional[@]}" -ne 2 ]; then
-    printf 'usage: prep vX.Y.Z "release message" [--dry-run|-n] [--no-build|-B]\n' >&2
+    printf 'usage: prep vX.Y.Z "release message" [--dry-run|-n]\n' >&2
     return 2
   fi
   local version message
-  version=$(_trim "${positional[0]}")
-  message=$(_trim "${positional[1]}")
-  prep_run "$dry" "$nobuild" "$verbose" "$version" "$message"
+  version="${positional[0]}"
+  message="${positional[1]}"
+  prep_run "$dry" "$version" "$message"
 }
 
 # Guarded entrypoint: run only when executed, not when sourced.

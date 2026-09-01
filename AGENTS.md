@@ -151,6 +151,7 @@ Note: prefer wording that is easiest for an LLM to follow, while staying simple 
 
 - Treat each authorization as scope-limited.
 - Require fresh approval for every new action.
+- Treat an explicit request to run govna audit as authorization for integrated audit adoption under ### Audit Adoption.
 - Continue Director-authorized Implement authority only for an eligible bounded completeness correction under `### Four-Phase Workflow`.
 - Require explicit approval for: create, delete, rename, publish, release, or any destructive change.
 - Require explicit approval for: governance files, CI/release config, secrets handling, external integrations.
@@ -162,7 +163,7 @@ Note: prefer wording that is easiest for an LLM to follow, while staying simple 
 - Ask for direction before proceeding.
 - Wait for explicit user request before preparing, executing, publishing, deploying, or distributing — including drafting commit messages, commit commands, version bumps, or release notes.
 - **Leave every `git commit` for the user to execute. No EXCEPTION.**
-- Treat an explicit standalone `Package`, `package`, `pack`, or `prep` request in an active Ratified AC context as the trigger for release-prep bookkeeping (CHANGELOG row insertion, release-tag drafting, commit-command drafting, release-command presentation).
+- Treat an explicit valid Package instruction for an established Ratified release batch as the trigger for release-prep bookkeeping.
 - Follow the Pre-Release Checklist in `govna/build-release.md` when executing release-prep bookkeeping.
 
 ### Effective Implementation Scope
@@ -224,18 +225,32 @@ Note: this rule does not prohibit batching independent commands.
 ### Four-Phase Workflow
 
 - Follow the lifecycle `Draft → Audit → Refine → Implement → Ratify → Package` for every governed AC.
+- Report each automatic phase transition and its evidence.
+- Pause immediately when an automatic-transition eligibility condition fails.
+- Pause immediately when a Director-owned decision appears.
+- Prevent automatic advancement from authorizing Implement, Ratify, Package, release preparation, publication, delegation, or commits.
 - Treat standalone `Draft` or `draft` as the Director-authorized pre-cycle action that creates the active AC.
 - Keep Draft outside the AC phases.
+- Enter Audit automatically when Draft completes the active AC with populated scope and acceptance tests.
+- Keep an unscoped stub paused until the Director scopes it.
+- Treat the Draft authorization as continuing authority for that automatic Audit entry.
 - Start each governed AC cycle in Audit when the AC is ready for adversarial review.
 - Challenge the AC, repository behavior, referenced documentation, scope, edge cases, omissions, and testability during Audit.
 - Recheck new or unresolved contract-integrity findings before completing Audit.
 - Keep Audit non-mutating.
 - Do not edit the AC or repository during Audit.
-- Pause after Audit and await explicit Director instruction to Refine.
+- Pause after Audit until the Director requests Refine unless integrated audit adoption or eligible automatic Refine entry applies.
+- Enter Refine automatically when Audit completes with only advancement-eligible findings.
+- Define an advancement-eligible finding as one outside every Director-owned category in `### General Gates` and roles.md `What the Operator Must Defer` with exactly one materially valid correction.
+- Block automatic Refine entry on any unresolved contract-integrity finding.
+- Report every autonomously resolved Audit finding with its resolution in the Refine completion.
 - Resolve Audit findings and incorporate settled Director decisions during Refine.
 - Pause Refine when a Director-specific decision remains unresolved.
 - Edit the AC during Refine when an Audit finding or settled Director decision requires an AC change.
 - Complete Refine without editing the AC when no Audit finding or settled Director decision requires an AC change and no Director-specific decision remains unresolved.
+- Run Pre-Implementation Verification after eligible automatic Refine completion.
+- Report implementation readiness only when that verification passes.
+- Remain in Refine when that verification finds a gap.
 - Validate AC-document-only Draft and Refine edits with the required document checks.
 - Keep AC-document-only Draft and Refine edits outside canonical validation cycles.
 - Do not begin implementation during Refine.
@@ -258,13 +273,10 @@ Note: this rule does not prohibit batching independent commands.
 - Prohibit the exception from creating a production or governance artifact.
 - Run Pre-Implementation Verification after each autonomous Refine correction.
 - Re-enter Implement automatically only after that verification passes.
-- Report each automatic phase transition and its evidence.
 - Count one round for one automatic Implement-to-Refine transition, its AC correction, successful Pre-Implementation Verification, and one automatic Refine-to-Implement transition.
 - Reset the round counter only when the Director authorizes Implement again.
 - Limit the exception to three correction rounds per Director-authorized Implement.
 - Pause for the Director before a fourth correction round.
-- Pause immediately when an eligibility condition fails.
-- Pause immediately when a Director-owned decision appears.
 - Prevent the exception from authorizing initial Implement, Audit, Ratify, Package, release preparation, publication, delegation, or commits.
 - Include tests, adversarial verification, and defect correction in Implement.
 - Apply `### Effective Implementation Scope` to eligible omitted artifacts during Implement and closure-audit correction.
@@ -272,6 +284,10 @@ Note: this rule does not prohibit batching independent commands.
 - Run one exhaustive, non-mutating closure audit after Implement, validation, adversarial verification, and defect correction.
 - Keep the closure-audit working record in the active agent's session.
 - Do not create a separate closure-audit artifact.
+- Capture one deterministic Implement evidence snapshot in the closure-audit working record.
+- Capture the snapshot after final validation and the last repository mutation.
+- Complete the snapshot before Implement completion.
+- Follow `govna/development-cycle.md` `### Implement Evidence Snapshot` for snapshot contents and dependency boundaries.
 - Map every in-scope command entry point, provider/API fetch, normalized-table write, durable snapshot, stale fallback, freshness gate, and complete-snapshot reconciliation path in the closure audit.
 - Check every in-scope governance instruction against `## Instruction Style` during the closure audit.
 - Map every referenced governance document across applicable source, template, and rendered-consumer paths in the closure audit.
@@ -287,6 +303,17 @@ Note: this rule does not prohibit batching independent commands.
 - State zero unresolved implementation findings in the Implement completion report before Ratify.
 - Pause after Implement and await Ratify.
 - Treat standalone `Ratify` or `ratify` after successful Implement completion as the Director's acceptance action.
+- Check the Implement evidence snapshot with non-mutating state, version, content-identity, and diff checks.
+- Treat evidence as current only when the snapshot is present, complete, and identity-matching.
+- Treat every non-current snapshot as stale evidence.
+- Treat an unrecorded input as stale when a reused validation or acceptance check can read it.
+- Treat uncertainty about an input's relevance as stale evidence.
+- Distinguish evidence currentness from acceptance-test outcome.
+- Preserve each recorded acceptance-test disposition exactly during reuse.
+- Apply existing Ratify routing to every current non-clean disposition.
+- Reuse current closure-audit findings, acceptance-test dispositions, render evidence, and final validation during Ratify.
+- Prohibit a new scratch directory, canon render, build, or test solely to repeat current evidence.
+- Rerun applicable validation when Ratify evidence is missing or stale.
 - Perform the final review during the same Ratify turn.
 - Recheck new or unresolved contract-integrity findings during Ratify.
 - Complete Ratify in that turn when the review finds no issue.
@@ -307,17 +334,40 @@ Note: this rule does not prohibit batching independent commands.
 - Use the successful final full build and clean Ratify review as current pre-change Package evidence.
 - Pass the full build's validation token to Rust prep during `Package` only when the repository provides Rust validation-token support.
 - Fall back to a pre-change full build only when Rust validation-token support exists and its prep evidence is missing or stale.
+- Define the pending release batch as every unpackaged AC whose implementation is present in the unreleased repository state.
+- Include an implemented AC in the pending release batch while it awaits Ratify.
+- Require every pending release-batch member to complete Ratify before Package.
+- Require the established release batch to equal the complete pending release batch.
+- Reject Package while excluded implemented work remains in the unreleased repository state.
+- Require the release-message AC-reference set to equal the established release batch before Package runs prep.
 - Preserve release-prep mutations, release behavior, and approval boundaries during `Package`.
 
 ### Phase-Advancement Rules
 
 - Treat only explicit Director action language as authorization to enter the named next action.
-- Exempt only an eligible bounded completeness correction under `### Four-Phase Workflow` from a fresh Refine or Implement action instruction.
+- Exempt integrated audit adoption, eligible automatic Refine entry, and an eligible bounded completeness correction from a fresh Refine action instruction.
+- Exempt completed-Draft automatic Audit entry from a fresh Audit action instruction.
+- Exempt only an eligible bounded completeness correction from a fresh Implement action instruction.
 - Treat standalone `Draft` or `draft` as the pre-cycle action that creates the active AC.
 - Require the Director to authorize Draft before creating the AC.
-- Start an AC cycle only when the Director identifies the active AC and explicitly requests Audit.
-- Apply an unnumbered action instruction to the sole AC under `govna/`.
-- Require the AC number when multiple ACs are present.
+- Start an AC cycle only after the Director identifies the AC and authorizes Audit, integrated audit adoption identifies the emitted AC, or a completed Draft identifies the active AC.
+- Apply an unnumbered Audit, Refine, Implement, or Ratify instruction when exactly one AC can enter the requested phase.
+- Require the AC number when multiple ACs can enter the requested phase.
+- Ask the Director for the AC number and last completed lifecycle action when phase eligibility cannot be established.
+- Treat one active Ratified AC as an established one-AC release batch only when it is the complete pending release batch.
+- Treat only a Director-named complete pending release batch as an established multi-AC release batch.
+- Accept only Package followed by a plus-joined list of uppercase AC<number> references as the named-batch Package form.
+- Apply standalone Package, package, pack, or prep to the established Ratified release batch.
+- Ask the Director to name the release batch when multiple ungrouped Ratified ACs can enter Package.
+- Reject a named release batch that contains a non-Ratified AC.
+- Measure the projected complete pending release batch with one private provisional prefix-plus-summary string before another AC enters Implement.
+- Use the provisional string only for the 80-byte fit check.
+- Discard the provisional string after the fit check.
+- Start another Implement only when the projected complete pending release batch can fit one compliant release message.
+- Require Package for the current fitting batch before another Implement when the projection cannot fit.
+- Recheck the complete pending release batch and exact release message before Package runs prep.
+- Reject an oversized or partial release batch.
+- Prohibit automatic release-batch splitting.
 - Treat a compound request as authorization for only the named action.
 - Pause before any unnamed action.
 - Treat ambiguous, unrelated, or implicit replies as non-advancing feedback.
@@ -348,7 +398,7 @@ Note: the Director flags scope concerns in chat during this window.
 
 - Run this checklist after the Director resolves all review questions.
 - Confirm each settled decision landed verbatim in the AC.
-- Treat a Director-resolved routing decision recorded in chat for an immutable emitted AC as satisfying the verbatim-in-AC check.
+- Treat a Director-resolved routing decision or explicit workflow override recorded in chat for an immutable emitted AC as satisfying the verbatim-in-AC check.
 - Confirm ATs match settled wording.
 - Confirm the AC title and Summary lead with the concrete outcome in plain language.
 - Confirm every new or rewritten instruction in AGENTS.md follows Instruction Style.
@@ -358,6 +408,25 @@ Note: the Director flags scope concerns in chat during this window.
 
 ### Audit Adoption
 
+- Apply integrated audit adoption only when the Director explicitly requests govna audit.
+- Enter Audit only when govna audit emits or reuses one guarded adoption AC.
+- Keep a clean audit result or pre-emission failure outside the AC phases.
+- Audit the emitted AC immediately.
+- Authorize the bounded scratch-review procedure in `govna/audit.md` from the original explicit `govna audit` request.
+- Bind the scratch review to the resolved Govna executable and the emitted AC marker versions.
+- Limit scratch-review authority to one unique system-temporary directory outside the consumer repository.
+- Keep the emitted AC and consumer repository unchanged during integrated Audit and Refine.
+- Remove the exact scratch directory before reporting Audit completion or a blocker.
+- End scratch-review authority when Audit ends.
+- Pause integrated audit adoption while any blocking finding or Director decision remains unresolved.
+- Resume Refine after the Director resolves every blocking finding and decision.
+- Require a new audit emission when a required correction would change the immutable AC.
+- Complete Refine without editing the emitted AC when no blocker remains.
+- Run Pre-Implementation Verification after integrated Refine.
+- Report implementation readiness only when Pre-Implementation Verification passes.
+- Remain in Refine when Pre-Implementation Verification finds a gap.
+- Stop integrated audit adoption before Implement.
+- Track the active phase in the session instead of the emitted AC.
 - Apply these rules whenever implementing an audit-emitted AC.
 - Treat every Director-resolved routing target as effective implementation scope, even when it is absent from `## In Scope`.
 - Treat each explicitly named migration destination as effective implementation scope with its routed source.
