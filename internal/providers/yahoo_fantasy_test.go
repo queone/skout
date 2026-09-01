@@ -25,6 +25,13 @@ func TestYahooFantasyFixturesNormalizeCompleteWorkflow(t *testing.T) {
 	if err != nil || settings.CurrentWeek == nil || *settings.CurrentWeek != 7 || len(settings.Categories) != 2 || len(settings.RosterPositions) != 2 || settings.League.ScoringType != domain.ScoringHeadToHead {
 		t.Fatalf("settings=%#v err=%v", settings, err)
 	}
+	if settings.League.EndDate != "" || settings.League.IsFinished {
+		t.Fatalf("absent season-end metadata parsed as set: %#v", settings.League)
+	}
+	finished, err := ParseLeagueSettings("mlb.l.1", yahooFixture(t, "league-settings-finished.json"))
+	if err != nil || finished.League.EndDate != "2026-09-20" || !finished.League.IsFinished {
+		t.Fatalf("finished settings=%#v err=%v", finished.League, err)
+	}
 	teams, err := ParseStandings("mlb.l.1", yahooFixture(t, "standings.json"))
 	if err != nil || len(teams) != 2 || teams[0].Wins != 107 || teams[0].Moves != 29 || teams[1].Name != "Opponents" {
 		t.Fatalf("teams=%#v err=%v", teams, err)

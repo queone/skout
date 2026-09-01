@@ -21,6 +21,10 @@ import (
 	"github.com/queone/skout/internal/transport"
 )
 
+// fantasyFreshnessTTL bounds how old the last successful Yahoo sync may be
+// before a fantasy read command runs a blocking sync first.
+const fantasyFreshnessTTL = 6 * time.Hour
+
 // PlayerPoolOptions contains the frozen hitter and pitcher selector surface.
 type PlayerPoolOptions struct {
 	Argument string
@@ -34,7 +38,10 @@ type FantasyService struct {
 	Store           *store.Store
 	League          string
 	TeamKey         string
+	ArchivedSeason  int
 	YahooScoreboard func(string, *int) ([]domain.Matchup, error)
+	RosterWeek      func(string, int) (domain.RosterWeekStats, error)
+	AutoSync        func() error
 	Schedule        func(string) ([]providers.ScheduleGame, error)
 	Lineups         func() ([]providers.DailyLineup, error)
 	HitterGameLog   func(int64, int64) ([]providers.HittingGameLogEntry, error)
@@ -45,7 +52,7 @@ type FantasyService struct {
 }
 
 // NewProductionFantasyService opens the compatible store and public providers.
-func NewProductionFantasyService(_ string, leagueOverride string, mode terminal.ColorMode) (*FantasyService, error) {
+func NewProductionFantasyService(_ string, leagueOverride string, season int, mode terminal.ColorMode) (*FantasyService, error) {
 	settings, err := config.Read()
 	if err != nil {
 		return nil, fmt.Errorf("player: read configuration: %w", err)
@@ -54,12 +61,22 @@ func NewProductionFantasyService(_ string, leagueOverride string, mode terminal.
 	if league == "" {
 		league = strings.TrimSpace(settings.CurrentLeague)
 	}
-	if league == "" {
+	if league == "" && season == 0 {
 		return nil, fmt.Errorf("player: no league selected; run skout st -l <key>")
 	}
 	database, err := store.Open()
 	if err != nil {
 		return nil, fmt.Errorf("player: open database: %w", err)
+	}
+	if season > 0 {
+		key, live, seasonErr := seasonScopedLeague(database, league, season)
+		if seasonErr != nil {
+			_ = database.Close()
+			return nil, fmt.Errorf("player: %w", seasonErr)
+		}
+		if !live {
+			return &FantasyService{Store: database, League: key, TeamKey: settings.CurrentTeamKey, ArchivedSeason: season, Now: time.Now, Mode: mode}, nil
+		}
 	}
 	disk, err := cache.Production()
 	if err != nil {
@@ -73,6 +90,7 @@ func NewProductionFantasyService(_ string, leagueOverride string, mode terminal.
 	return &FantasyService{
 		Store: database, League: league, TeamKey: settings.CurrentTeamKey,
 		YahooScoreboard: yahoo.Scoreboard,
+		RosterWeek:      yahoo.RosterWeekStats,
 		Schedule: func(date string) ([]providers.ScheduleGame, error) {
 			result, err := mlb.FetchScheduleCached(date, disk)
 			return result.Games, err
@@ -85,6 +103,41 @@ func NewProductionFantasyService(_ string, leagueOverride string, mode terminal.
 	}, nil
 }
 
+// seasonScopedLeague resolves a season flag to a stored league key, or reports live handling.
+func seasonScopedLeague(database *store.Store, league string, season int) (string, bool, error) {
+	if league != "" {
+		stored, err := database.FantasySeason(league)
+		if err != nil {
+			return "", false, err
+		}
+		if stored != nil && *stored == season {
+			return league, true, nil
+		}
+	}
+	keys, err := database.LeaguesForSeason(season)
+	if err != nil {
+		return "", false, err
+	}
+	if len(keys) == 1 {
+		return keys[0], false, nil
+	}
+	if len(keys) > 1 {
+		return "", false, fmt.Errorf("season %d has multiple stored leagues; select one with -l <key>: %s", season, strings.Join(keys, ", "))
+	}
+	seasons, err := database.FantasySeasons()
+	if err != nil {
+		return "", false, err
+	}
+	if len(seasons) == 0 {
+		return "", false, fmt.Errorf("no fantasy seasons are stored; run skout sync and retry")
+	}
+	labels := make([]string, 0, len(seasons))
+	for _, value := range seasons {
+		labels = append(labels, strconv.Itoa(value))
+	}
+	return "", false, fmt.Errorf("season %d is not stored; stored seasons: %s", season, strings.Join(labels, ", "))
+}
+
 // Close releases the fantasy service store.
 func (service *FantasyService) Close() error {
 	if service == nil || service.Store == nil {
@@ -93,9 +146,33 @@ func (service *FantasyService) Close() error {
 	return service.Store.Close()
 }
 
+// ensureFreshYahoo runs one blocking sync when the last successful Yahoo sync
+// is missing or older than the fantasy freshness threshold.
+func (service *FantasyService) ensureFreshYahoo(command string) error {
+	if service.ArchivedSeason > 0 || service.AutoSync == nil {
+		return nil
+	}
+	needs, err := service.Store.NeedsSyncItem("yahoo_public", "fantasy", service.League, store.ItemRefreshPolicy{TTL: fantasyFreshnessTTL, PipelineVersion: syncPipelineVersion})
+	if err != nil || !needs {
+		return nil
+	}
+	syncErr := service.AutoSync()
+	if syncErr == nil {
+		return nil
+	}
+	state, stateErr := service.Store.SyncItemState("yahoo_public", "fantasy", service.League)
+	if stateErr == nil && state != nil && state.LastSuccessfulAt != nil {
+		return nil
+	}
+	return fmt.Errorf("%s: Yahoo sync failed (%v) and no prior sync data exists; check connectivity and run skout sync", command, syncErr)
+}
+
 // Roster renders the selected stored fantasy roster with optional live context.
 func (service *FantasyService) Roster(query string) (string, error) {
 	if err := service.validate("r"); err != nil {
+		return "", err
+	}
+	if err := service.ensureFreshYahoo("r"); err != nil {
 		return "", err
 	}
 	teams, err := service.Store.FantasyTeams(service.League)
@@ -104,9 +181,9 @@ func (service *FantasyService) Roster(query string) (string, error) {
 	}
 	team, err := selectFantasyTeam(teams, service.TeamKey, query)
 	if err != nil {
-		return "", fmt.Errorf("r: %w", err)
+		return "", fmt.Errorf("r: %w", service.archivedTeamHint(teams, err))
 	}
-	all, err := service.Store.FantasyPlayers(service.League)
+	all, err := service.fantasyPlayers()
 	if err != nil {
 		return "", fantasyError("r", "read players", err)
 	}
@@ -119,15 +196,19 @@ func (service *FantasyService) Roster(query string) (string, error) {
 	if len(players) == 0 {
 		return "", fmt.Errorf("r: the selected team has no durable roster snapshot; run skout sync and retry")
 	}
+	service.overlayLiveSlots(team.TeamKey, players)
 	sortRosterPlayers(players)
 	service.populateGameStatuses(players, all)
 	output := display.RenderFantasyPlayers(team.Name, players, service.Mode)
-	return service.yahooNotice(output)
+	return service.finishFantasyOutput(output)
 }
 
 // Totals renders season totals or one selected Yahoo scoring period.
 func (service *FantasyService) Totals(weekly string) (string, error) {
 	if err := service.validate("rt"); err != nil {
+		return "", err
+	}
+	if err := service.ensureFreshYahoo("rt"); err != nil {
 		return "", err
 	}
 	if weekly != "" {
@@ -137,11 +218,11 @@ func (service *FantasyService) Totals(weekly string) (string, error) {
 	if err != nil {
 		return "", fantasyError("rt", "read teams", err)
 	}
-	players, err := service.Store.FantasyPlayers(service.League)
+	players, err := service.fantasyPlayers()
 	if err != nil {
 		return "", fantasyError("rt", "read players", err)
 	}
-	return service.yahooNotice(display.RenderLeagueTotals(teams, players, service.Mode))
+	return service.finishFantasyOutput(display.RenderLeagueTotals(teams, players, service.Mode))
 }
 
 // Pool renders one role's player pool or a single detail card.
@@ -157,7 +238,10 @@ func (service *FantasyService) Pool(role string, options PlayerPoolOptions) (str
 	if err := service.validate(command); err != nil {
 		return "", err
 	}
-	players, err := service.Store.FantasyPlayers(service.League)
+	if err := service.ensureFreshYahoo(command); err != nil {
+		return "", err
+	}
+	players, err := service.fantasyPlayers()
 	if err != nil {
 		return "", fantasyError(command, "read players", err)
 	}
@@ -218,7 +302,7 @@ func (service *FantasyService) Pool(role string, options PlayerPoolOptions) (str
 	if role == "P" {
 		title = "PITCHERS"
 	}
-	return service.yahooNotice(display.RenderFantasyPlayers(title, selected, service.Mode))
+	return service.finishFantasyOutput(display.RenderFantasyPlayers(title, selected, service.Mode))
 }
 
 func (service *FantasyService) playerDetail(command string, players []domain.StoredFantasyPlayer, query string) (string, error) {
@@ -274,7 +358,7 @@ func (service *FantasyService) playerDetail(command string, players []domain.Sto
 		}
 	}
 	today := service.now().Format("2006-01-02")
-	return service.yahooNotice(display.RenderPlayerDetail(player, logs, average, next, stale, today, service.Mode))
+	return service.finishFantasyOutput(display.RenderPlayerDetail(player, logs, average, next, stale, today, service.Mode))
 }
 
 func (service *FantasyService) gameLogs(player domain.StoredFantasyPlayer, season int64) ([]domain.PlayerGameLog, bool, error) {
@@ -295,7 +379,7 @@ func (service *FantasyService) gameLogs(player domain.StoredFantasyPlayer, seaso
 				if inningsValue(row.Stat.InningsPitched) >= 6 && row.Stat.EarnedRuns <= 3 {
 					qs = 1
 				}
-				logs = append(logs, domain.PlayerGameLog{Date: row.Date, GameID: row.GameID, Opponent: fmt.Sprintf("%s %s", map[bool]string{true: "vs", false: "@"}[row.IsHome], MLBTeamAbbreviation(row.OpponentTeamID)), Line: fmt.Sprintf("IP %s  QS %d  W %d  SV %d  K %d  ERA %s  WHIP %s", row.Stat.InningsPitched, qs, row.Stat.Wins, row.Stat.Saves, row.Stat.Strikeouts, row.Stat.ERA, row.Stat.WHIP)})
+				logs = append(logs, domain.PlayerGameLog{Date: row.Date, GameID: row.GameID, Opponent: fmt.Sprintf("%s %s", map[bool]string{true: "v", false: "@"}[row.IsHome], MLBTeamAbbreviation(row.OpponentTeamID)), Line: fmt.Sprintf("IP %s  QS %d  W %d  SV %d  K %d  ERA %s  WHIP %s", row.Stat.InningsPitched, qs, row.Stat.Wins, row.Stat.Saves, row.Stat.Strikeouts, row.Stat.ERA, row.Stat.WHIP)})
 			}
 		}
 	} else {
@@ -528,7 +612,11 @@ func (service *FantasyService) weeklyTotals(requested string) (string, error) {
 	if err != nil {
 		return "", fantasyError("rt", "read categories", err)
 	}
-	return display.RenderWeeklyTotals(selected.Name, fmt.Sprintf("WEEK %d", matchup.Week), *selected, categories, stale, service.Mode), nil
+	output := display.RenderWeeklyTotals(selected.Name, fmt.Sprintf("WEEK %d", matchup.Week), *selected, categories, stale && service.ArchivedSeason == 0, service.Mode)
+	if service.ArchivedSeason > 0 {
+		output = display.ArchivedNotice(service.ArchivedSeason, service.Mode) + output
+	}
+	return output, nil
 }
 
 func (service *FantasyService) weeklyMatchup(week int) (domain.Matchup, bool, error) {
@@ -546,7 +634,9 @@ func (service *FantasyService) weeklyMatchup(week int) (domain.Matchup, bool, er
 			return domain.Matchup{}, false, err
 		}
 	} else {
-		_, _ = service.Store.MarkCommandSnapshotStale("match_scoreboard", "yahoo", scope, "Yahoo scoreboard unavailable")
+		if service.YahooScoreboard != nil {
+			_, _ = service.Store.MarkCommandSnapshotStale("match_scoreboard", "yahoo", scope, "Yahoo scoreboard unavailable")
+		}
 		snapshot, err := service.Store.CommandSnapshot("match_scoreboard", "yahoo", scope)
 		if err != nil || snapshot == nil || snapshot.SnapshotVersion != "v1" || json.Unmarshal([]byte(snapshot.Payload), &rows) != nil || !validMatchupRows(rows) {
 			return domain.Matchup{}, false, fmt.Errorf("requested week has no complete matchup snapshot")
@@ -648,7 +738,7 @@ func applyGameStatuses(players []domain.StoredFantasyPlayer, games []providers.S
 				continue
 			}
 			opponent := MLBTeamAbbreviation(game.AwayTeamID)
-			location := "vs " + opponent
+			location := "v " + opponent
 			lineup := game.HomeLineup
 			probable := game.HomeProbablePitcherID
 			if away {
@@ -695,6 +785,73 @@ func applyGameStatuses(players []domain.StoredFantasyPlayer, games []providers.S
 			break
 		}
 	}
+}
+
+// overlayLiveSlots replaces stored roster slots with the live current-week
+// slots so same-day lineup moves render correctly; stored slots stand when the
+// live fetch and its snapshot fallback are both unavailable.
+func (service *FantasyService) overlayLiveSlots(teamKey string, players []domain.StoredFantasyPlayer) {
+	if service.ArchivedSeason > 0 || service.RosterWeek == nil {
+		return
+	}
+	week, err := service.Store.FantasyCurrentWeek(service.League)
+	if err != nil || week == nil {
+		return
+	}
+	scope := fmt.Sprintf("%s:%d", teamKey, *week)
+	live, err := service.RosterWeek(teamKey, *week)
+	if err == nil && validRoster(live, teamKey, *week) {
+		if payload, encodeErr := json.Marshal(live); encodeErr == nil {
+			_ = service.Store.SaveCommandSnapshot("match_roster", "yahoo", scope, "v2", string(payload))
+		}
+	} else {
+		snapshot, readErr := service.Store.CommandSnapshot("match_roster", "yahoo", scope)
+		if readErr != nil || snapshot == nil || snapshot.SnapshotVersion != "v2" || json.Unmarshal([]byte(snapshot.Payload), &live) != nil || !validRoster(live, teamKey, *week) {
+			return
+		}
+	}
+	slots := make(map[int64]string, len(live.Players))
+	for _, player := range live.Players {
+		slots[player.YahooPlayerID] = player.SlotPosition.String()
+	}
+	for index := range players {
+		player := &players[index]
+		if player.YahooPlayerID == nil {
+			continue
+		}
+		if slot, ok := slots[*player.YahooPlayerID]; ok && slot != "" && slot != "--" {
+			value := slot
+			player.Slot = &value
+		}
+	}
+}
+
+// fantasyPlayers reads league players, pinning stats to the archived season when one is selected.
+func (service *FantasyService) fantasyPlayers() ([]domain.StoredFantasyPlayer, error) {
+	if service.ArchivedSeason > 0 {
+		return service.Store.FantasyPlayersForSeason(service.League, service.ArchivedSeason)
+	}
+	return service.Store.FantasyPlayers(service.League)
+}
+
+// finishFantasyOutput labels archived output or applies the live staleness notice.
+func (service *FantasyService) finishFantasyOutput(output string) (string, error) {
+	if service.ArchivedSeason > 0 {
+		return display.ArchivedNotice(service.ArchivedSeason, service.Mode) + output, nil
+	}
+	return service.yahooNotice(output)
+}
+
+// archivedTeamHint replaces a failed current-team match with the archived season's team list.
+func (service *FantasyService) archivedTeamHint(teams []store.StoredFantasyTeam, err error) error {
+	if service.ArchivedSeason == 0 || len(teams) == 0 {
+		return err
+	}
+	names := make([]string, 0, len(teams))
+	for _, team := range teams {
+		names = append(names, team.Name)
+	}
+	return fmt.Errorf("%v (archived season %d teams: %s)", err, service.ArchivedSeason, strings.Join(names, ", "))
 }
 
 func (service *FantasyService) yahooNotice(output string) (string, error) {

@@ -81,6 +81,19 @@ func Dim(value string, mode ColorMode) string {
 	return style(value, "38;5;245", mode)
 }
 
+// Bold styles emphasized values with the shared bold role.
+func Bold(value string, mode ColorMode) string {
+	return style(value, "1", mode)
+}
+
+// Inverse renders a value in reverse video while preserving surrounding color.
+func Inverse(value string, mode ColorMode) string {
+	if mode != Color {
+		return value
+	}
+	return "\x1b[7m" + value + "\x1b[27m"
+}
+
 // Good styles favorable MLB context with the shared green role.
 func Good(value string, mode ColorMode) string {
 	return style(value, "38;5;34", mode)

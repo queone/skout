@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -222,17 +223,9 @@ func RenderSlate(rows []domain.SlateRow, warnings []string, mode terminal.ColorM
 			value := int(math.Round(*row.WinProbability * 100))
 			percentage = &value
 		}
-		awayFavored := percentage != nil && *percentage > 50
-		homeFavored := percentage != nil && *percentage < 50
-		away := pitcherCell(row.AwayPitcher, row.AwayFreeAgent && awayFavored, row.AwayMine, mode)
-		home := pitcherCell(row.HomePitcher, row.HomeFreeAgent && homeFavored, row.HomeMine, mode)
-		filled, probability := 0, "—%"
-		if percentage != nil {
-			filled = (max(0, min(100, *percentage)) + 5) / 10
-			probability = fmt.Sprintf("%d%%", *percentage)
-		}
-		bar := strings.Repeat("█", filled) + strings.Repeat("░", 10-filled)
-		fmt.Fprintf(&output, "%s v %s  %-6s %-7s  %s %s\n", away, home, row.GameTime, row.AwayTeam+"@"+row.HomeTeam, bar, probability)
+		away := pitcherCell(row.AwayPitcher, row.AwayFreeAgent, row.AwayMine, mode)
+		home := pitcherCell(row.HomePitcher, row.HomeFreeAgent, row.HomeMine, mode)
+		fmt.Fprintf(&output, "%s v %s  %-6s %-7s  %s\n", away, home, row.GameTime, row.AwayTeam+"@"+row.HomeTeam, OddsBar(percentage, mode))
 	}
 	if len(rows) == 0 {
 		output.WriteString("No MLB games are scheduled.\n")
@@ -262,17 +255,37 @@ func statusWithInjury(gameStatus, injuryStatus string) string {
 	}
 	return injuryStatus
 }
+
+// OddsBar renders a ten-cell win-probability bar with the percentage embedded
+// in the filled block, green above 49 percent.
+func OddsBar(percentage *int, mode terminal.ColorMode) string {
+	cells := []rune(strings.Repeat("░", 10))
+	if percentage == nil {
+		return string(cells)
+	}
+	filled := (max(0, min(100, *percentage)) + 5) / 10
+	for index := range filled {
+		cells[index] = '█'
+	}
+	label := []rune(strconv.Itoa(*percentage) + "%")
+	start := max(0, (filled-len(label))/2)
+	if start+len(label) > len(cells) {
+		start = len(cells) - len(label)
+	}
+	bar := string(cells[:start]) + terminal.Inverse(string(label), mode) + string(cells[start+len(label):])
+	if *percentage > 49 {
+		return terminal.Good(bar, mode)
+	}
+	return bar
+}
+
 func pitcherCell(name string, freeAgent, mine bool, mode terminal.ColorMode) string {
 	fields := strings.Fields(name)
 	last := "TBD"
 	if len(fields) > 0 {
 		last = fields[len(fields)-1]
 	}
-	suffix := ""
-	if freeAgent {
-		suffix = " (FA)"
-	}
-	value := fit(last+suffix, 16)
+	value := fit(last, 16)
 	if mine {
 		return terminal.Warning(value, mode)
 	}

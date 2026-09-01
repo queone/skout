@@ -17,7 +17,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const CurrentSchemaVersion int64 = 6
+const CurrentSchemaVersion int64 = 7
 
 //go:embed schema.sql
 var schemaSQL string
@@ -384,6 +384,27 @@ UPDATE schema_version SET version=5`
 			}
 		}
 		script = "UPDATE schema_version SET version=6"
+	case 6:
+		exists, err := tableExists(ctx, executor, "yahoo_leagues")
+		if err != nil {
+			return operationError("check version-seven migration target table", path, err)
+		}
+		if exists {
+			for _, column := range []struct{ name, definition string }{
+				{"end_date", "TEXT NOT NULL DEFAULT ''"},
+				{"is_finished", "INTEGER NOT NULL DEFAULT 0"},
+				{"archived", "INTEGER NOT NULL DEFAULT 0"},
+			} {
+				present, err := columnExists(ctx, executor, "yahoo_leagues", column.name)
+				if err != nil {
+					return operationError("check version-seven migration target column", path, err)
+				}
+				if !present {
+					script += fmt.Sprintf("ALTER TABLE yahoo_leagues ADD COLUMN %s %s; ", column.name, column.definition)
+				}
+			}
+		}
+		script += "UPDATE schema_version SET version=7"
 	default:
 		return unsupported(path, fmt.Sprintf("database schema version %d is not supported", version))
 	}
@@ -396,6 +417,12 @@ UPDATE schema_version SET version=5`
 func tableExists(ctx context.Context, executor sqlExecutor, name string) (bool, error) {
 	var count int64
 	err := executor.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name=?", name).Scan(&count)
+	return count != 0, err
+}
+
+func columnExists(ctx context.Context, executor sqlExecutor, table, name string) (bool, error) {
+	var count int64
+	err := executor.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?", table, name).Scan(&count)
 	return count != 0, err
 }
 

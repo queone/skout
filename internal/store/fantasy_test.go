@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,6 +118,79 @@ INSERT INTO mlb_team_active_rosters(team_abbr,mlbam_id,primary_type,status,fetch
 	}
 	if pitcher == nil || pitcher.Role != "P" || pitcher.Hand != "L" || pitcher.Pitching[0] != 60 || pitcher.PitchingAdvanced[0] == nil || *pitcher.PitchingAdvanced[0] != 97.1 || pitcher.HittingAdvanced[0] != nil || pitcher.Status != "" {
 		t.Fatalf("role-distinct pitcher=%#v", pitcher)
+	}
+}
+
+func TestArchivedLeagueFreezesSnapshotAndResolvesBySeason(t *testing.T) {
+	database, err := OpenAt(filepath.Join(t.TempDir(), "archive.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	snapshot := fantasySnapshot("mlb.l.1")
+	snapshot.League.EndDate = "2026-09-20"
+	snapshot.League.IsFinished = true
+	if err := database.ReplaceFantasySnapshot(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	var endDate string
+	var finished int64
+	if err := database.conn.QueryRowContext(context.Background(), "SELECT end_date,is_finished FROM yahoo_leagues WHERE league_key='mlb.l.1'").Scan(&endDate, &finished); err != nil || endDate != "2026-09-20" || finished != 1 {
+		t.Fatalf("end_date=%q is_finished=%d err=%v", endDate, finished, err)
+	}
+	if err := database.MarkLeagueArchived("mlb.l.1"); err != nil {
+		t.Fatal(err)
+	}
+	archived, err := database.LeagueArchived("mlb.l.1")
+	if err != nil || !archived {
+		t.Fatalf("archived=%v err=%v", archived, err)
+	}
+	if err := database.ReplaceFantasySnapshot(snapshot); err == nil || !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("archived league accepted a snapshot write: %v", err)
+	}
+	other := fantasySnapshot("mlb.l.2")
+	other.League.Season = 2027
+	if err := database.ReplaceFantasySnapshot(other); err != nil {
+		t.Fatalf("unarchived league write failed: %v", err)
+	}
+	keys, err := database.LeaguesForSeason(2026)
+	if err != nil || len(keys) != 1 || keys[0] != "mlb.l.1" {
+		t.Fatalf("keys=%v err=%v", keys, err)
+	}
+	seasons, err := database.FantasySeasons()
+	if err != nil || len(seasons) != 2 || seasons[0] != 2027 || seasons[1] != 2026 {
+		t.Fatalf("seasons=%v err=%v", seasons, err)
+	}
+	if err := database.MarkLeagueArchived("mlb.l.404"); err == nil {
+		t.Fatal("archiving an unknown league succeeded")
+	}
+}
+
+func TestFantasyPlayersForSeasonPinsStatsToTheArchivedSeason(t *testing.T) {
+	database, err := OpenAt(filepath.Join(t.TempDir(), "pinned.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.ReplaceFantasySnapshot(fantasySnapshot("mlb.l.1")); err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.conn.ExecContext(testContext(), `UPDATE players SET mlbam_id=10 WHERE yahoo_player_id=101;
+INSERT INTO mlbam_season_stats(player_id,season,stat_group,g,pa,r,hr,rbi,sb,avg,synced_at) VALUES((SELECT id FROM players WHERE yahoo_player_id=101),2026,'hitting',50,200,30,8,25,4,.275,1);
+INSERT INTO mlbam_season_stats(player_id,season,stat_group,g,pa,r,hr,rbi,sb,avg,synced_at) VALUES((SELECT id FROM players WHERE yahoo_player_id=101),2027,'hitting',150,650,90,25,80,12,.301,1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := database.FantasyPlayersForSeason("mlb.l.1", 2026)
+	if err != nil || len(pinned) == 0 || pinned[0].Batting[0] != 200 {
+		t.Fatalf("pinned=%#v err=%v", pinned, err)
+	}
+	live, err := database.FantasyPlayers("mlb.l.1")
+	if err != nil || len(live) == 0 || live[0].Batting[0] != 650 {
+		t.Fatalf("live=%#v err=%v", live, err)
+	}
+	if _, err := database.FantasyPlayersForSeason("mlb.l.1", 0); err == nil {
+		t.Fatal("non-positive season accepted")
 	}
 }
 

@@ -58,6 +58,9 @@ CREATE TABLE IF NOT EXISTS yahoo_leagues (
     trade_deadline  TEXT,
     min_ip          INTEGER,
     waiver_type     TEXT,
+    end_date        TEXT    NOT NULL DEFAULT '',
+    is_finished     INTEGER NOT NULL DEFAULT 0,
+    archived        INTEGER NOT NULL DEFAULT 0,
     synced_at       INTEGER NOT NULL
 );
 

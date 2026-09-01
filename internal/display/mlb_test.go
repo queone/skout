@@ -64,6 +64,39 @@ func TestTotalsAndProbablesPlainOutputMatchFrozenGoldens(t *testing.T) {
 	}
 }
 
+func TestOddsBarEmbedsPercentageAndAppliesGreenGate(t *testing.T) {
+	for percent, want := range map[int]string{46: "█46%█░░░░░", 49: "█49%█░░░░░", 60: "█60%██░░░░", 100: "███100%███", 0: "0%░░░░░░░░"} {
+		value := percent
+		if got := OddsBar(&value, terminal.Plain); got != want {
+			t.Fatalf("bar %d=%q want %q", percent, got, want)
+		}
+	}
+	if got := OddsBar(nil, terminal.Plain); got != "░░░░░░░░░░" {
+		t.Fatalf("nil bar=%q", got)
+	}
+	fifty := 50
+	if got := OddsBar(&fifty, terminal.Color); !strings.HasPrefix(got, "\x1b[38;5;34m") || !strings.Contains(got, "\x1b[7m50%\x1b[27m") {
+		t.Fatalf("bar above the gate lacks green or reverse-video label: %q", got)
+	}
+	fortyNine := 49
+	if got := OddsBar(&fortyNine, terminal.Color); strings.Contains(got, "38;5;34") || !strings.Contains(got, "\x1b[7m49%\x1b[27m") {
+		t.Fatalf("bar at the gate is green or lacks the reverse-video label: %q", got)
+	}
+}
+
+func TestSlateFreeAgentIsGreenWithoutSuffixEvenWithoutOdds(t *testing.T) {
+	slate := RenderSlate([]domain.SlateRow{{Date: "2026-08-15", GameID: 1, GameTime: "7:05 PM EDT", AwayTeam: "NYY", HomeTeam: "BOS", AwayPitcher: "Ace Starter", HomePitcher: "Home Pitcher", AwayFreeAgent: true}}, nil, terminal.Color)
+	if strings.Contains(slate, "(FA)") {
+		t.Fatalf("slate retains the FA suffix: %q", slate)
+	}
+	if !strings.Contains(slate, "\x1b[38;5;34mStarter") {
+		t.Fatalf("odds-less free agent is not green: %q", slate)
+	}
+	if !strings.Contains(slate, "░░░░░░░░░░") {
+		t.Fatalf("odds-less bar is not empty: %q", slate)
+	}
+}
+
 func TestDisplayWarningsAndEmptySlateAreExplicit(t *testing.T) {
 	if got := RenderSlate(nil, []string{"odds unavailable"}, terminal.Plain); got != "WARNING — odds unavailable\nNo MLB games are scheduled.\n" {
 		t.Fatalf("empty slate=%q", got)

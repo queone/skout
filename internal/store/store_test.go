@@ -146,7 +146,7 @@ func TestStoreMigratesEverySupportedVersionAndRollsBackInjectedFailures(t *testi
 				t.Fatalf("migrate version %d: %v", version, err)
 			}
 			var got int64
-			if err := conn.QueryRowContext(context.Background(), "SELECT version FROM schema_version").Scan(&got); err != nil || got != 6 {
+			if err := conn.QueryRowContext(context.Background(), "SELECT version FROM schema_version").Scan(&got); err != nil || got != CurrentSchemaVersion {
 				t.Fatalf("version=%d err=%v", got, err)
 			}
 			var retained string
@@ -190,7 +190,7 @@ func TestStoreMigratesEverySupportedVersionAndRollsBackInjectedFailures(t *testi
 }
 
 func TestStoreRejectsUnsupportedSchemaWithoutMutation(t *testing.T) {
-	for _, setup := range []string{"CREATE TABLE unrelated(value TEXT); INSERT INTO unrelated VALUES('keep')", "CREATE TABLE schema_version(version INTEGER PRIMARY KEY)", "CREATE TABLE schema_version(version TEXT PRIMARY KEY); INSERT INTO schema_version VALUES('bad')", "CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(0)", "CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(7)", "CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(1); INSERT INTO schema_version VALUES(2)"} {
+	for _, setup := range []string{"CREATE TABLE unrelated(value TEXT); INSERT INTO unrelated VALUES('keep')", "CREATE TABLE schema_version(version INTEGER PRIMARY KEY)", "CREATE TABLE schema_version(version TEXT PRIMARY KEY); INSERT INTO schema_version VALUES('bad')", "CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(0)", "CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(8)", "CREATE TABLE schema_version(version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES(1); INSERT INTO schema_version VALUES(2)"} {
 		path := filepath.Join(t.TempDir(), "invalid.db")
 		db, err := sql.Open("sqlite", path)
 		if err != nil {
@@ -227,6 +227,37 @@ func TestStoreRejectsUnsupportedSchemaWithoutMutation(t *testing.T) {
 		if strings.EqualFold(journal, "wal") {
 			t.Errorf("unsupported setup changed journal mode: %s", setup)
 		}
+	}
+}
+
+func TestStoreVersionSixMigrationAddsLeagueArchiveColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "version-six.db")
+	database, err := OpenAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.conn.ExecContext(context.Background(), `CREATE TABLE yahoo_leagues_v6 (league_key TEXT PRIMARY KEY, name TEXT NOT NULL, season INTEGER NOT NULL, num_teams INTEGER NOT NULL, scoring_type TEXT NOT NULL, current_week INTEGER, faab_budget INTEGER, max_weekly_adds INTEGER, trade_deadline TEXT, min_ip INTEGER, waiver_type TEXT, synced_at INTEGER NOT NULL);
+INSERT INTO yahoo_leagues_v6(league_key,name,season,num_teams,scoring_type,current_week,synced_at) VALUES('mlb.l.9','Kept League',2026,10,'head-to-head',20,1);
+DROP TABLE yahoo_leagues; ALTER TABLE yahoo_leagues_v6 RENAME TO yahoo_leagues;
+UPDATE schema_version SET version=6`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	migrated, err := OpenAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrated.Close()
+	var name, endDate string
+	var finished, archived int64
+	if err := migrated.conn.QueryRowContext(context.Background(), "SELECT name,end_date,is_finished,archived FROM yahoo_leagues WHERE league_key='mlb.l.9'").Scan(&name, &endDate, &finished, &archived); err != nil || name != "Kept League" || endDate != "" || finished != 0 || archived != 0 {
+		t.Fatalf("league name=%q end_date=%q is_finished=%d archived=%d err=%v", name, endDate, finished, archived, err)
+	}
+	frozen, err := migrated.LeagueArchived("mlb.l.9")
+	if err != nil || frozen {
+		t.Fatalf("archived=%v err=%v", frozen, err)
 	}
 }
 

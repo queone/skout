@@ -46,6 +46,69 @@ func TestFantasyDisplayGoldensAndSemanticWidths(t *testing.T) {
 	}
 }
 
+func TestFantasyDisplayFixesForPositionsOwnerAndInjuredPool(t *testing.T) {
+	for value, want := range map[string]string{"SS,IL": "SS", "SP,IL15": "SP", "OF,NA": "OF", "IL10": "IL10"} {
+		if got := strings.TrimSpace(FantasyPositions(value, false)); got != want {
+			t.Fatalf("positions %q=%q want %q", value, got, want)
+		}
+	}
+	players := sampleFantasyPlayers()
+	players[0].Owner = nil
+	pool := RenderFantasyPlayers("HITTERS", players[:1], terminal.Color)
+	if !strings.Contains(pool, "\x1b[38;5;34m<available>") {
+		t.Fatalf("available owner is not green: %q", pool)
+	}
+	plain := RenderFantasyPlayers("HITTERS", players[:1], terminal.Plain)
+	if !strings.Contains(plain, "<available>") || strings.Contains(plain, "\x1b[") {
+		t.Fatalf("plain pool=%q", plain)
+	}
+	players[1].Owner = nil
+	players[1].Status = "IL15"
+	injured := RenderFantasyPlayers("PITCHERS", players[1:], terminal.Color)
+	if !strings.Contains(injured, "\x1b[38;5;100m") {
+		t.Fatalf("injured pool row is not yellow: %q", injured)
+	}
+}
+
+func TestLineupMarkerStaysStyledWhenTheStatusStartsWithIt(t *testing.T) {
+	indicator := domain.GameIndicator{Kind: domain.GameIndicatorStartingPitcher}
+	leading := fantasyIndicator(fantasyFit("●", 17), indicator, false, terminal.Color)
+	if !strings.HasPrefix(leading, "\x1b[38;5;46m●") {
+		t.Fatalf("leading marker is not green: %q", leading)
+	}
+	embedded := fantasyIndicator(fantasyFit("7:40p ● v MIA", 17), indicator, false, terminal.Color)
+	if !strings.Contains(embedded, "\x1b[38;5;46m●") {
+		t.Fatalf("embedded marker is not green: %q", embedded)
+	}
+	plain := fantasyIndicator(fantasyFit("●", 17), indicator, false, terminal.Plain)
+	if strings.Contains(plain, "\x1b[") {
+		t.Fatalf("plain marker is styled: %q", plain)
+	}
+}
+
+func TestLeagueTotalsBoldCategoryValuesAndDimContext(t *testing.T) {
+	teams := []store.StoredFantasyTeam{{TeamKey: "mlb.l.1.t.1", Name: "Operators", Rank: 1, Wins: 121, Losses: 88, Ties: 11}}
+	colored := RenderLeagueTotals(teams, sampleFantasyPlayers(), terminal.Color)
+	if !strings.Contains(colored, "\x1b[1m") || !strings.Contains(colored, "\x1b[38;5;245m") {
+		t.Fatalf("totals lack bold categories or dim context: %q", colored)
+	}
+	plain := RenderLeagueTotals(teams, nil, terminal.Plain)
+	if !strings.Contains(plain, "   1   121-88-11") {
+		t.Fatalf("double-digit WLT misaligned: %q", plain)
+	}
+}
+
+func TestArchivedNoticeLabelsFrozenSeasons(t *testing.T) {
+	plain := ArchivedNotice(2026, terminal.Plain)
+	if plain != "ARCHIVED — season 2026 data frozen at season end.\n" {
+		t.Fatalf("plain=%q", plain)
+	}
+	colored := ArchivedNotice(2026, terminal.Color)
+	if !strings.Contains(colored, "\x1b[") || !strings.HasSuffix(colored, "\n") || !strings.Contains(colored, "season 2026") {
+		t.Fatalf("colored=%q", colored)
+	}
+}
+
 func TestFantasyLineupIndicatorsRespectSubduedRosterRows(t *testing.T) {
 	base := sampleFantasyPlayers()[0]
 	activeSlot, benchSlot, injuredSlot := "OF", "BN", "IL"
@@ -90,7 +153,7 @@ func TestFantasyDetailGoldensMissingValuesAndStaleLabels(t *testing.T) {
 	players := sampleFantasyPlayers()
 	logs := []domain.PlayerGameLog{{Date: "2026-08-24", GameID: 1, Opponent: "@BOS", BattingOrder: 4, Line: "H 2 AB 4 R 1 HR 1 RBI 2 SB 0 AVG .500"}}
 	hitter := RenderPlayerDetail(players[0], logs, &domain.HitterAverage{PlateAppearances: 600, OnBasePercentage: .350, OnBasePlusSlugging: .800, Runs: 90, HomeRuns: 25, RunsBattedIn: 80, StolenBases: 10, BattingAverage: .275}, "NEXT20PA", true, "2026-08-25", terminal.Plain)
-	pitcher := RenderPlayerDetail(players[1], []domain.PlayerGameLog{{Date: "2026-08-24", GameID: 2, Opponent: "vs TB", Line: "IP 6.0 W 1 SV 0 K 7 ERA 3.00 WHIP 1.00"}}, nil, "", false, "2026-08-25", terminal.Plain)
+	pitcher := RenderPlayerDetail(players[1], []domain.PlayerGameLog{{Date: "2026-08-24", GameID: 2, Opponent: "v TB", Line: "IP 6.0 W 1 SV 0 K 7 ERA 3.00 WHIP 1.00"}}, nil, "", false, "2026-08-25", terminal.Plain)
 	assertDisplayGolden(t, "testdata/fantasy/hitter-detail.txt", hitter)
 	assertDisplayGolden(t, "testdata/fantasy/pitcher-detail.txt", pitcher)
 	if !strings.Contains(hitter, "GAME LOG data may be stale") || !strings.Contains(hitter, "—") || strings.Contains(pitcher, "AVG162G") {

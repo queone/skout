@@ -31,6 +31,7 @@ type SyncOptions struct {
 	Version        string
 	League         string
 	Team           string
+	Auto           bool
 	Debug          bool
 	Input          io.Reader
 	Prompt         io.Writer
@@ -70,6 +71,7 @@ type SyncService struct {
 	InputTerminal    bool
 	OutputTerminal   bool
 	Origin           store.SyncOrigin
+	Now              func() time.Time
 	lockHeld         bool
 	startReported    bool
 	yahooProgress    *syncProgressLine
@@ -232,21 +234,33 @@ func (service *SyncService) Run(leagueOverride, teamOverride string) (string, er
 		return "", fmt.Errorf("sync: start sync run: %w", err)
 	}
 	outcomes := make([]syncOutcome, 0, len(service.Steps)+1)
-	yahoo := service.runSyncItem("yahoo_public", "fantasy", leagueKey, func(database *store.Store) (SyncStepResult, error) {
-		teamKey, count, err := service.synchronizeYahoo(database, leagueKey, teamOverride, settings.CurrentTeamKey)
-		if err != nil {
-			return SyncStepResult{}, err
+	var yahoo syncOutcome
+	archived, archivedErr := service.Store.LeagueArchived(leagueKey)
+	if archivedErr != nil {
+		_ = writeSyncOutput(service.Output, "==> yahoo_public fantasy: fetching")
+		yahoo = service.finishOutcome(syncOutcome{source: "yahoo_public", item: "fantasy", detail: "read league archive state: " + archivedErr.Error()})
+	} else if archived {
+		if err := writeSyncOutput(service.Output, "==> yahoo_public fantasy: skipped — the league season is archived; its data is frozen\n"); err != nil {
+			return "", fmt.Errorf("sync: write progress: %w", err)
 		}
-		updated := settings
-		updated.CurrentLeague = leagueKey
-		updated.CurrentTeamKey = teamKey
-		updated.PullPublicLeagueID = ""
-		if err := config.WriteAt(service.ConfigPath, updated); err != nil {
-			return SyncStepResult{}, fmt.Errorf("save team identity: %w", err)
-		}
-		settings = updated
-		return SyncStepResult{Count: count}, nil
-	})
+		yahoo = syncOutcome{source: "yahoo_public", item: "fantasy", succeeded: true, skipped: true}
+	} else {
+		yahoo = service.runSyncItem("yahoo_public", "fantasy", leagueKey, func(database *store.Store) (SyncStepResult, error) {
+			teamKey, count, detail, err := service.synchronizeYahoo(database, leagueKey, teamOverride, settings.CurrentTeamKey)
+			if err != nil {
+				return SyncStepResult{}, err
+			}
+			updated := settings
+			updated.CurrentLeague = leagueKey
+			updated.CurrentTeamKey = teamKey
+			updated.PullPublicLeagueID = ""
+			if err := config.WriteAt(service.ConfigPath, updated); err != nil {
+				return SyncStepResult{}, fmt.Errorf("save team identity: %w", err)
+			}
+			settings = updated
+			return SyncStepResult{Count: count, Detail: detail}, nil
+		})
+	}
 	outcomes = append(outcomes, yahoo)
 	for _, step := range service.Steps {
 		if step.Run == nil || strings.TrimSpace(step.Source) == "" || strings.TrimSpace(step.Item) == "" {
@@ -401,14 +415,14 @@ func (service *SyncService) resumeYahooProgress() error {
 	return service.yahooProgress.resume()
 }
 
-func (service *SyncService) synchronizeYahoo(database *store.Store, leagueKey, teamOverride, savedTeam string) (string, int64, error) {
+func (service *SyncService) synchronizeYahoo(database *store.Store, leagueKey, teamOverride, savedTeam string) (string, int64, string, error) {
 	settings, err := service.Yahoo.LeagueSettings(leagueKey)
 	if err != nil {
-		return "", 0, fmt.Errorf("fetch public Yahoo settings: %w", err)
+		return "", 0, "", fmt.Errorf("fetch public Yahoo settings: %w", err)
 	}
 	teams, err := service.Yahoo.Standings(leagueKey)
 	if err != nil {
-		return "", 0, fmt.Errorf("fetch public Yahoo standings: %w", err)
+		return "", 0, "", fmt.Errorf("fetch public Yahoo standings: %w", err)
 	}
 	teamKeys := make([]string, 0, len(teams))
 	for _, team := range teams {
@@ -418,14 +432,14 @@ func (service *SyncService) synchronizeYahoo(database *store.Store, leagueKey, t
 		service.reportYahooPlayers(count)
 	})
 	if err != nil {
-		return "", 0, fmt.Errorf("fetch public Yahoo rosters: %w", err)
+		return "", 0, "", fmt.Errorf("fetch public Yahoo rosters: %w", err)
 	}
 	service.reportYahooPlayers(len(rosters.Players))
 	freeAgents, err := service.Yahoo.FreeAgents(leagueKey, func(count int) {
 		service.reportYahooPlayers(len(rosters.Players) + count)
 	})
 	if err != nil {
-		return "", 0, fmt.Errorf("fetch public Yahoo free agents: %w", err)
+		return "", 0, "", fmt.Errorf("fetch public Yahoo free agents: %w", err)
 	}
 	service.reportYahooPlayers(len(rosters.Players) + len(freeAgents))
 	requestedTeam := strings.TrimSpace(teamOverride)
@@ -434,14 +448,14 @@ func (service *SyncService) synchronizeYahoo(database *store.Store, leagueKey, t
 	}
 	teamKey, err := selectPrimaryTeam(teams, requestedTeam, service.InputTerminal, service.Input, service.Prompt, service.suspendYahooProgress, service.resumeYahooProgress)
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	if settings.CurrentWeek != nil && *settings.CurrentWeek > 0 {
 		service.reportYahooMatchups(0, *settings.CurrentWeek)
 	}
 	history, err := acquireMatchupHistory(service.Yahoo, leagueKey, teamKey, settings.CurrentWeek, service.reportYahooMatchups)
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	players := append(append([]domain.FantasyPlayer(nil), rosters.Players...), freeAgents...)
 	categories := make([]store.CategoryWrite, 0, len(settings.Categories))
@@ -456,21 +470,42 @@ func (service *SyncService) synchronizeYahoo(database *store.Store, leagueKey, t
 	for _, entry := range history {
 		payload, err := json.Marshal(entry.matchups)
 		if err != nil {
-			return "", 0, fmt.Errorf("serialize matchup history: %w", err)
+			return "", 0, "", fmt.Errorf("serialize matchup history: %w", err)
 		}
 		commands = append(commands, store.FantasyCommandSnapshotWrite{Dataset: "match_scoreboard", Source: "yahoo", Scope: fmt.Sprintf("%s:%d", leagueKey, entry.week), Version: "v1", Payload: string(payload)})
 		for _, roster := range entry.rosters {
 			payload, err := json.Marshal(roster)
 			if err != nil {
-				return "", 0, fmt.Errorf("serialize matchup roster history: %w", err)
+				return "", 0, "", fmt.Errorf("serialize matchup roster history: %w", err)
 			}
 			commands = append(commands, store.FantasyCommandSnapshotWrite{Dataset: "match_roster", Source: "yahoo", Scope: fmt.Sprintf("%s:%d", roster.TeamKey, entry.week), Version: "v1", Payload: string(payload)})
 		}
 	}
 	if err := database.ReplaceFantasySyncSnapshot(store.FantasySnapshotWrite{League: settings.League, CurrentWeek: settings.CurrentWeek, Categories: categories, Positions: positions, Teams: teams, Players: players, Slots: rosters.Slots}, commands); err != nil {
-		return "", 0, fmt.Errorf("persist public Yahoo fantasy snapshot: %w; prior complete data was retained", err)
+		return "", 0, "", fmt.Errorf("persist public Yahoo fantasy snapshot: %w; prior complete data was retained", err)
 	}
-	return teamKey, int64(len(players)), nil
+	detail := ""
+	if leagueSeasonEnded(settings.League, service.syncNow()) {
+		if err := database.MarkLeagueArchived(leagueKey); err != nil {
+			return "", 0, "", fmt.Errorf("archive finished league season: %w", err)
+		}
+		detail = fmt.Sprintf("season %d ended; final snapshot captured and league archived", settings.League.Season)
+	}
+	return teamKey, int64(len(players)), detail, nil
+}
+
+func leagueSeasonEnded(league domain.League, now time.Time) bool {
+	if league.IsFinished {
+		return true
+	}
+	return domain.IsValidISODate(league.EndDate) && now.Format("2006-01-02") > league.EndDate
+}
+
+func (service *SyncService) syncNow() time.Time {
+	if service.Now == nil {
+		return time.Now()
+	}
+	return service.Now()
 }
 
 // SelectPrimaryTeam resolves exact or unique case-insensitive team matches.

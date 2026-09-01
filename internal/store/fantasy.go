@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -107,14 +108,23 @@ func (store *Store) ReplaceFantasySyncSnapshot(snapshot FantasySnapshotWrite, co
 	}
 	leagueKey := snapshot.League.LeagueKey
 	return store.immediate(operation, func(ctx context.Context, executor sqlExecutor) error {
+		var archived int64
+		if err := executor.QueryRowContext(ctx, "SELECT archived FROM yahoo_leagues WHERE league_key=?", leagueKey).Scan(&archived); err != nil && err != sql.ErrNoRows {
+			return operationError(operation, store.path, err)
+		}
+		if archived != 0 {
+			return fmt.Errorf("%s: league %s is archived; its season data is frozen and cannot be replaced", operation, leagueKey)
+		}
 		if _, err := executor.ExecContext(ctx, `INSERT INTO yahoo_leagues
-(league_key,name,season,num_teams,scoring_type,current_week,synced_at)
-VALUES(?,?,?,?,?,?,?)
+(league_key,name,season,num_teams,scoring_type,current_week,end_date,is_finished,synced_at)
+VALUES(?,?,?,?,?,?,?,?,?)
 ON CONFLICT(league_key) DO UPDATE SET name=excluded.name,season=excluded.season,
 num_teams=excluded.num_teams,scoring_type=excluded.scoring_type,
-current_week=excluded.current_week,synced_at=excluded.synced_at`,
+current_week=excluded.current_week,end_date=excluded.end_date,
+is_finished=excluded.is_finished,synced_at=excluded.synced_at`,
 			leagueKey, snapshot.League.Name, snapshot.League.Season, snapshot.League.NumTeams,
-			snapshot.League.ScoringType.String(), snapshot.CurrentWeek, now); err != nil {
+			snapshot.League.ScoringType.String(), snapshot.CurrentWeek, snapshot.League.EndDate,
+			boolInteger(snapshot.League.IsFinished), now); err != nil {
 			return operationError(operation, store.path, err)
 		}
 		if _, err := executor.ExecContext(ctx, "DELETE FROM yahoo_stat_categories WHERE league_key=?", leagueKey); err != nil {
@@ -294,6 +304,84 @@ func (store *Store) FantasySeason(leagueKey string) (*int, error) {
 	return &season, nil
 }
 
+// LeagueArchived reports whether one league's season data is frozen.
+func (store *Store) LeagueArchived(leagueKey string) (bool, error) {
+	if err := validateIdentity("read league archive state", "league key", leagueKey); err != nil {
+		return false, err
+	}
+	var archived int64
+	err := store.conn.QueryRowContext(context.Background(), "SELECT archived FROM yahoo_leagues WHERE league_key=?", leagueKey).Scan(&archived)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, operationError("read league archive state", store.path, err)
+	}
+	return archived != 0, nil
+}
+
+// MarkLeagueArchived freezes one league's season data against further sync writes.
+func (store *Store) MarkLeagueArchived(leagueKey string) error {
+	const operation = "archive league season"
+	if err := validateIdentity(operation, "league key", leagueKey); err != nil {
+		return err
+	}
+	return store.immediate(operation, func(ctx context.Context, executor sqlExecutor) error {
+		result, err := executor.ExecContext(ctx, "UPDATE yahoo_leagues SET archived=1 WHERE league_key=?", leagueKey)
+		if err != nil {
+			return operationError(operation, store.path, err)
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return operationError(operation, store.path, err)
+		}
+		if count == 0 {
+			return fmt.Errorf("%s: league %s is not stored; run skout sync and retry", operation, leagueKey)
+		}
+		return nil
+	})
+}
+
+// LeaguesForSeason lists stored league keys for one season in key order.
+func (store *Store) LeaguesForSeason(season int) ([]string, error) {
+	const operation = "resolve season league"
+	if season <= 0 {
+		return nil, fmt.Errorf("%s: season must be positive; correct the value and retry", operation)
+	}
+	rows, err := store.conn.QueryContext(context.Background(), "SELECT league_key FROM yahoo_leagues WHERE season=? ORDER BY league_key", season)
+	if err != nil {
+		return nil, operationError(operation, store.path, err)
+	}
+	defer rows.Close()
+	var output []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, operationError(operation, store.path, err)
+		}
+		output = append(output, key)
+	}
+	return output, rows.Err()
+}
+
+// FantasySeasons lists stored league seasons in descending order.
+func (store *Store) FantasySeasons() ([]int, error) {
+	rows, err := store.conn.QueryContext(context.Background(), "SELECT DISTINCT season FROM yahoo_leagues ORDER BY season DESC")
+	if err != nil {
+		return nil, operationError("list fantasy seasons", store.path, err)
+	}
+	defer rows.Close()
+	var output []int
+	for rows.Next() {
+		var season int
+		if err := rows.Scan(&season); err != nil {
+			return nil, operationError("list fantasy seasons", store.path, err)
+		}
+		output = append(output, season)
+	}
+	return output, rows.Err()
+}
+
 // FantasyCategories reads displayed categories in league order.
 func (store *Store) FantasyCategories(leagueKey string) ([]StoredFantasyCategory, error) {
 	rows, err := store.conn.QueryContext(context.Background(), "SELECT stat_id,abbr,seq FROM yahoo_stat_categories WHERE league_key=? AND display_only=0 ORDER BY seq,stat_id", leagueKey)
@@ -332,10 +420,22 @@ func (store *Store) FantasyPositions(leagueKey string) ([]PositionWrite, error) 
 
 // FantasyPlayers reads rostered and free-agent players for one league.
 func (store *Store) FantasyPlayers(leagueKey string) ([]StoredFantasyPlayer, error) {
+	return store.fantasyPlayers(leagueKey, nil)
+}
+
+// FantasyPlayersForSeason reads league players with stats pinned to one stored season.
+func (store *Store) FantasyPlayersForSeason(leagueKey string, season int) ([]StoredFantasyPlayer, error) {
+	if season <= 0 {
+		return nil, fmt.Errorf("read fantasy players: season must be positive; correct the value and retry")
+	}
+	return store.fantasyPlayers(leagueKey, &season)
+}
+
+func (store *Store) fantasyPlayers(leagueKey string, seasonPin *int) ([]StoredFantasyPlayer, error) {
 	if err := validateIdentity("read fantasy players", "league key", leagueKey); err != nil {
 		return nil, err
 	}
-	rows, err := store.conn.QueryContext(context.Background(), `SELECT p.yahoo_player_id,p.mlbam_id,p.name,COALESCE(p.mlb_team,''),COALESCE(p.position_type,''),COALESCE(p.eligible_positions,p.display_position,''),
+	query := `SELECT p.yahoo_player_id,p.mlbam_id,p.name,COALESCE(p.mlb_team,''),COALESCE(p.position_type,''),COALESCE(p.eligible_positions,p.display_position,''),
 CASE WHEN COALESCE(p.status,'') NOT IN ('','IL') THEN p.status
 WHEN (SELECT r.status FROM mlb_team_active_rosters r WHERE r.mlbam_id=p.mlbam_id AND r.primary_type=CASE WHEN p.position_type='P' THEN 'P' ELSE 'H' END LIMIT 1)='D7' THEN 'IL7'
 WHEN (SELECT r.status FROM mlb_team_active_rosters r WHERE r.mlbam_id=p.mlbam_id AND r.primary_type=CASE WHEN p.position_type='P' THEN 'P' ELSE 'H' END LIMIT 1)='D10' THEN 'IL10'
@@ -362,7 +462,16 @@ LEFT JOIN statcast_seasons sh ON sh.player_id=(SELECT p2.id FROM players p2 WHER
 LEFT JOIN statcast_seasons sp ON sp.player_id=(SELECT p2.id FROM players p2 WHERE p2.mlbam_id=p.mlbam_id AND p2.position_type='P' ORDER BY CASE WHEN p2.mlbam_match_source='seed' THEN 0 ELSE 1 END DESC,p2.yahoo_player_id IS NULL,p2.id LIMIT 1) AND sp.stat_group='pitching' AND sp.season=(SELECT MAX(season) FROM statcast_seasons)
 LEFT JOIN fangraphs_batted_ball fg ON fg.player_id=(SELECT p2.id FROM players p2 WHERE p2.mlbam_id=p.mlbam_id AND p2.position_type IN ('H','B') ORDER BY CASE WHEN p2.mlbam_match_source='seed' THEN 0 ELSE 1 END DESC,p2.yahoo_player_id IS NULL,p2.id LIMIT 1) AND fg.season=(SELECT MAX(season) FROM fangraphs_batted_ball)
 WHERE p.yahoo_player_id IS NOT NULL AND (t.team_key IS NOT NULL OR fa.player_id IS NOT NULL)
-ORDER BY COALESCE(p.yahoo_rank,999999),p.name,p.yahoo_player_id`, leagueKey, leagueKey)
+ORDER BY COALESCE(p.yahoo_rank,999999),p.name,p.yahoo_player_id`
+	if seasonPin != nil {
+		pin := strconv.Itoa(*seasonPin)
+		query = strings.NewReplacer(
+			"(SELECT MAX(season) FROM mlbam_season_stats)", pin,
+			"(SELECT MAX(season) FROM statcast_seasons)", pin,
+			"(SELECT MAX(season) FROM fangraphs_batted_ball)", pin,
+		).Replace(query)
+	}
+	rows, err := store.conn.QueryContext(context.Background(), query, leagueKey, leagueKey)
 	if err != nil {
 		return nil, operationError("read fantasy players", store.path, err)
 	}

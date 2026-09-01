@@ -54,7 +54,7 @@ Yahoo synchronization acquires independent team rosters and matchup weeks with a
 
 ## Persistence
 
-The runtime uses `$HOME/.config/skout/config.json`, `$HOME/.config/skout/skout.db`, and the platform cache root under `skout/api-cache`. Configuration and cache replacement are private and atomic. SQLite uses schema version 6, one dedicated connection, WAL mode, a five-second busy timeout, and immediate transactions for complete replacements.
+The runtime uses `$HOME/.config/skout/config.json`, `$HOME/.config/skout/skout.db`, and the platform cache root under `skout/api-cache`. Configuration and cache replacement are private and atomic. SQLite uses schema version 7, one dedicated connection, WAL mode, a five-second busy timeout, and immediate transactions for complete replacements.
 
 Production SQLite commands hold a shared database-operation lock for their complete connection or inspection lifetime. Reset takes the lock exclusively, so it cannot remove local state beneath another command. The separate synchronization lock continues to prevent overlapping foreground syncs. Reset rejects non-regular database-family targets, deletes the primary database before its auxiliary files, and preserves configuration, cache, runtime locks, and unrelated files.
 
@@ -66,7 +66,7 @@ Fantasy roster and pool reads join role-distinct MLB identities to current and p
 
 Credentials, Yahoo roster mutation, background scheduling, and long-running services remain outside the runtime boundary. Every advertised command now has an executable Go path. The Rust reference repository is already archived and is not a runtime or release dependency.
 
-The application remains on SQLite schema version 6 and introduces no schema version 7 behavior.
+The application uses SQLite schema version 7, whose `yahoo_leagues` columns record each league's Yahoo season end date, finished flag, and archived marker. The sync that first observes a finished Yahoo season captures its final snapshot and then archives the league; later syncs skip an archived league, and the fantasy snapshot writer refuses to replace one. The `-S`/`--season` flag serves an archived season read-only from local rows, with player statistics pinned to that season and no provider requests.
 
 ## Dependencies
 

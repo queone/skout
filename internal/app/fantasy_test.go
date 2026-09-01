@@ -19,9 +19,18 @@ type fantasyAppClock struct{ value time.Time }
 
 func (clock fantasyAppClock) Now() time.Time { return clock.value }
 
+type adjustableClock struct{ value *time.Time }
+
+func (clock adjustableClock) Now() time.Time { return *clock.value }
+
 func fantasyAppStore(t *testing.T, now time.Time) *store.Store {
 	t.Helper()
-	database, err := store.OpenAtWithClock(filepath.Join(t.TempDir(), "app.db"), fantasyAppClock{now})
+	return fantasyAppStoreWithClock(t, fantasyAppClock{now})
+}
+
+func fantasyAppStoreWithClock(t *testing.T, clock store.Clock) *store.Store {
+	t.Helper()
+	database, err := store.OpenAtWithClock(filepath.Join(t.TempDir(), "app.db"), clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +81,159 @@ func TestFantasyServiceRosterTotalsPoolAndEffectiveLeague(t *testing.T) {
 	pool, err := service.Pool("B", PlayerPoolOptions{Argument: "1", Position: "of"})
 	if err != nil || strings.Count(pool, "\n") < 2 || !strings.Contains(pool, "Ada Hitter") || strings.Contains(pool, "Ace Pitcher") {
 		t.Fatalf("pool=%q err=%v", pool, err)
+	}
+}
+
+func TestFantasyCommandsEnforceTheSixHourAutoSyncGate(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	database := fantasyAppStoreWithClock(t, adjustableClock{&now})
+	defer database.Close()
+	calls := 0
+	service := &FantasyService{Store: database, League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", Now: func() time.Time { return now }, Mode: terminal.Plain,
+		AutoSync: func() error {
+			calls++
+			return database.MarkSyncItemSuccess("yahoo_public", "fantasy", "mlb.l.1", syncPipelineVersion)
+		}}
+	if _, err := service.Roster(""); err != nil || calls != 1 {
+		t.Fatalf("missing sync state: calls=%d err=%v", calls, err)
+	}
+	if _, err := service.Roster(""); err != nil || calls != 1 {
+		t.Fatalf("fresh sync state: calls=%d err=%v", calls, err)
+	}
+	now = now.Add(7 * time.Hour)
+	if _, err := service.Totals(""); err != nil || calls != 2 {
+		t.Fatalf("stale sync state: calls=%d err=%v", calls, err)
+	}
+	now = now.Add(3 * time.Hour)
+	if _, err := service.Pool("B", PlayerPoolOptions{}); err != nil || calls != 2 {
+		t.Fatalf("inside threshold: calls=%d err=%v", calls, err)
+	}
+	archived := &FantasyService{Store: database, League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", ArchivedSeason: 2026, Now: func() time.Time { return now }, Mode: terminal.Plain,
+		AutoSync: func() error { calls++; return nil }}
+	if _, err := archived.Roster("operators"); err != nil || calls != 2 {
+		t.Fatalf("archived read triggered sync: calls=%d err=%v", calls, err)
+	}
+}
+
+func TestAutoSyncFailureFallsBackToLocalDataOrGuidesAnEmptyStore(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	database := fantasyAppStoreWithClock(t, adjustableClock{&now})
+	defer database.Close()
+	failing := func() error {
+		id, err := database.StartSyncRun(store.SyncLive, store.OriginManual)
+		if err != nil {
+			return err
+		}
+		if _, err := database.FailSyncRun(id); err != nil {
+			return err
+		}
+		return errors.New("providers offline")
+	}
+	if err := database.MarkSyncItemSuccess("yahoo_public", "fantasy", "mlb.l.1", syncPipelineVersion); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(8 * time.Hour)
+	stale := &FantasyService{Store: database, League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", Now: func() time.Time { return now }, Mode: terminal.Plain, AutoSync: failing}
+	roster, err := stale.Roster("")
+	if err != nil || !strings.Contains(roster, "STALE — showing the last complete") || !strings.Contains(roster, "ROSTER: Operators") {
+		t.Fatalf("stale fallback roster=%q err=%v", roster, err)
+	}
+	emptyDatabase, err := store.OpenAt(filepath.Join(t.TempDir(), "empty.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer emptyDatabase.Close()
+	empty := &FantasyService{Store: emptyDatabase, League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", Now: func() time.Time { return now }, Mode: terminal.Plain,
+		AutoSync: func() error { return errors.New("providers offline") }}
+	if _, err := empty.Roster(""); err == nil || !strings.Contains(err.Error(), "run skout sync") {
+		t.Fatalf("empty store error=%v", err)
+	}
+}
+
+func TestRosterOverlaysLiveSlotsAndKeepsStoredSlotsOnFailure(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	live := domain.RosterWeekStats{TeamKey: "mlb.l.1.t.1", Week: 7, Players: []domain.PlayerWeekStats{
+		{YahooPlayerID: 101, Name: "Ada Hitter", Team: "NYY", PositionType: "B", SlotPosition: domain.PositionBench},
+		{YahooPlayerID: 102, Name: "Ace Pitcher", Team: "BOS", PositionType: "P", SlotPosition: domain.PositionStartingPitcher},
+	}}
+	database := fantasyAppStore(t, now)
+	defer database.Close()
+	service := &FantasyService{Store: database, League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", Now: func() time.Time { return now }, Mode: terminal.Plain,
+		RosterWeek: func(team string, week int) (domain.RosterWeekStats, error) { return live, nil }}
+	roster, err := service.Roster("")
+	if err != nil || !strings.Contains(roster, "BN    Ada Hitter") {
+		t.Fatalf("live slot roster=%q err=%v", roster, err)
+	}
+	service.RosterWeek = func(string, int) (domain.RosterWeekStats, error) {
+		return domain.RosterWeekStats{}, errors.New("yahoo unavailable")
+	}
+	fallback, err := service.Roster("")
+	if err != nil || !strings.Contains(fallback, "BN    Ada Hitter") {
+		t.Fatalf("snapshot fallback roster=%q err=%v", fallback, err)
+	}
+	bare := fantasyAppStore(t, now)
+	defer bare.Close()
+	stored := &FantasyService{Store: bare, League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", Now: func() time.Time { return now }, Mode: terminal.Plain,
+		RosterWeek: func(string, int) (domain.RosterWeekStats, error) {
+			return domain.RosterWeekStats{}, errors.New("yahoo unavailable")
+		}}
+	kept, err := stored.Roster("")
+	if err != nil || !strings.Contains(kept, "OF    Ada Hitter") {
+		t.Fatalf("stored slot roster=%q err=%v", kept, err)
+	}
+}
+
+func TestArchivedSeasonReadsServeLocalRowsAndLabelOutput(t *testing.T) {
+	now := time.Date(2027, 5, 1, 12, 0, 0, 0, time.UTC)
+	database := fantasyAppStore(t, now)
+	defer database.Close()
+	if err := database.MarkLeagueArchived("mlb.l.1"); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal([]domain.Matchup{{Week: 7, WeekStart: "2026-08-24", WeekEnd: "2026-08-30", Teams: [2]domain.MatchupTeam{{TeamKey: "mlb.l.1.t.1", Name: "Operators", Stats: map[string]string{"7": "12"}}, {TeamKey: "mlb.l.1.t.2", Name: "Rivals", Stats: map[string]string{"7": "9"}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SaveCommandSnapshot("match_scoreboard", "yahoo", "mlb.l.1:7", "v1", string(payload)); err != nil {
+		t.Fatal(err)
+	}
+	service := &FantasyService{Store: database, League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", ArchivedSeason: 2026, Now: func() time.Time { return now }, Mode: terminal.Plain}
+	roster, err := service.Roster("operators")
+	if err != nil || !strings.Contains(roster, "ARCHIVED — season 2026") || !strings.Contains(roster, "ROSTER: Operators") || !strings.Contains(roster, "Ada Hitter") {
+		t.Fatalf("roster=%q err=%v", roster, err)
+	}
+	totals, err := service.Totals("")
+	if err != nil || !strings.Contains(totals, "ARCHIVED — season 2026") || !strings.Contains(totals, "Rivals") {
+		t.Fatalf("totals=%q err=%v", totals, err)
+	}
+	weekly, err := service.Totals("true")
+	if err != nil || !strings.Contains(weekly, "ARCHIVED — season 2026") || !strings.Contains(weekly, "WEEK 7") {
+		t.Fatalf("weekly=%q err=%v", weekly, err)
+	}
+	pool, err := service.Pool("B", PlayerPoolOptions{})
+	if err != nil || !strings.Contains(pool, "ARCHIVED — season 2026") || !strings.Contains(pool, "Free Hitter") {
+		t.Fatalf("pool=%q err=%v", pool, err)
+	}
+	stray := &FantasyService{Store: database, League: "mlb.l.1", TeamKey: "mlb.l.2027.t.9", ArchivedSeason: 2026, Now: func() time.Time { return now }, Mode: terminal.Plain}
+	if _, err := stray.Roster(""); err == nil || !strings.Contains(err.Error(), "archived season 2026 teams: Operators, Rivals") {
+		t.Fatalf("stray team error=%v", err)
+	}
+}
+
+func TestSeasonScopedLeagueResolvesLiveArchivedAndMissingSeasons(t *testing.T) {
+	now := time.Date(2027, 5, 1, 12, 0, 0, 0, time.UTC)
+	database := fantasyAppStore(t, now)
+	defer database.Close()
+	key, live, err := seasonScopedLeague(database, "", 2026)
+	if err != nil || live || key != "mlb.l.1" {
+		t.Fatalf("key=%q live=%v err=%v", key, live, err)
+	}
+	key, live, err = seasonScopedLeague(database, "mlb.l.1", 2026)
+	if err != nil || !live || key != "mlb.l.1" {
+		t.Fatalf("live key=%q live=%v err=%v", key, live, err)
+	}
+	if _, _, err := seasonScopedLeague(database, "", 1999); err == nil || !strings.Contains(err.Error(), "stored seasons: 2026") {
+		t.Fatalf("missing season error=%v", err)
 	}
 }
 

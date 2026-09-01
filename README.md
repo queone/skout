@@ -68,6 +68,11 @@ skout h -p OF -s pa        # filter and sort a player pool
 skout p -w                 # Yahoo-available pitchers, qualified first
 skout h judge              # one hitter detail card and recent game log
 
+# Archived seasons
+skout r -S 2026            # a past season's roster from the local archive
+skout rt --season 2026     # a past season's team totals
+skout m -S 2026 -w 7       # a stored matchup week from a past season
+
 # Reference and diagnostics
 skout i                    # browse the embedded glossary
 skout i xwoba              # look up one term
@@ -75,6 +80,10 @@ skout fetch <host> <path>  # inspect an allowlisted provider response
 skout --help               # show command help
 skout --version            # show the binary version
 ```
+
+Fantasy commands (`m`, `r`, `rt`, `h`, `p`) check when the last successful Yahoo sync ran; when it is missing or older than 6 hours, they run a blocking sync with progress output before rendering; that sync refreshes only providers whose own freshness windows have lapsed. If that sync fails, the command serves the last successful data with a staleness notice; MLB commands keep their own per-dataset refresh windows.
+
+When the Yahoo league reports its season has ended, the next `skout sync` captures the final snapshot and archives that league locally; later syncs skip it and never overwrite its data. The `-S`/`--season` flag on `m`, `r`, `rt`, `h`, and `p` reads an archived season entirely from the local database, with no provider requests, and labels the output as archived.
 
 `skout reset` displays the database path and accepts only `y` or `yes` before deleting it. It removes the database and its SQLite auxiliary files while preserving configuration, provider cache entries, and unrelated files. Reset refuses to run while another skout command is using the local database.
 

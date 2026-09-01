@@ -70,8 +70,12 @@ func SyncProduction(options SyncOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	origin := store.OriginManual
+	if options.Auto {
+		origin = store.OriginAutomatic
+	}
 	sources := syncSourceSet{
-		Force:      true,
+		Force:      !options.Auto,
 		MLBHitting: mlb.FetchBulkHittingStats, MLBPitching: mlb.FetchBulkPitchingStats,
 		MLBQualityStarts: mlb.FetchQualityStarts, MLBDirectory: mlb.FetchTeamDirectory,
 		MLBRoster: mlb.FetchRoster, SavantBatting: savant.FetchBatting,
@@ -84,7 +88,7 @@ func SyncProduction(options SyncOptions) (string, error) {
 		ConfigPath: configPath, RuntimeDirectory: runtimeDirectory,
 		CanonicalLeague: providers.CanonicalPublicLeagueKey,
 		Input:           options.Input, Prompt: options.Prompt, Output: output,
-		InputTerminal: options.InputTerminal, OutputTerminal: options.OutputTerminal, Origin: store.OriginManual,
+		InputTerminal: options.InputTerminal, OutputTerminal: options.OutputTerminal, Origin: origin,
 		lockHeld: true, startReported: true,
 	}
 	if service.Input == nil {

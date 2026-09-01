@@ -40,25 +40,48 @@ type MatchupOptions struct {
 
 // MatchupService orchestrates public Yahoo matchup acquisition and fallback.
 type MatchupService struct {
-	Store         *store.Store
-	League        string
-	TeamKey       string
-	Season        int
-	FetchRedzone  func(string, string) (providers.RedzoneFeed, error)
-	Scoreboard    func(string, *int) ([]domain.Matchup, error)
-	RosterWeek    func(string, int) (domain.RosterWeekStats, error)
-	RosterDay     func(string, int, string) (domain.RosterWeekStats, error)
-	HittingRange  func(int64, string, string) ([]providers.BulkHittingSplit, error)
-	PitchingRange func(int64, string, string) ([]providers.BulkPitchingSplit, error)
-	Schedule      func(string) ([]providers.ScheduleGame, error)
-	Odds          func(time.Time) (providers.ESPNSlateLines, error)
-	PersistTeam   func(string) error
-	Now           func() time.Time
-	Mode          terminal.ColorMode
+	Store          *store.Store
+	League         string
+	TeamKey        string
+	Season         int
+	ArchivedSeason int
+	FetchRedzone   func(string, string) (providers.RedzoneFeed, error)
+	Scoreboard     func(string, *int) ([]domain.Matchup, error)
+	RosterWeek     func(string, int) (domain.RosterWeekStats, error)
+	RosterDay      func(string, int, string) (domain.RosterWeekStats, error)
+	HittingRange   func(int64, string, string) ([]providers.BulkHittingSplit, error)
+	PitchingRange  func(int64, string, string) ([]providers.BulkPitchingSplit, error)
+	Schedule       func(string) ([]providers.ScheduleGame, error)
+	Odds           func(time.Time) (providers.ESPNSlateLines, error)
+	PersistTeam    func(string) error
+	AutoSync       func() error
+	Now            func() time.Time
+	Mode           terminal.ColorMode
+}
+
+// ensureFreshYahoo runs one blocking sync when the last successful Yahoo sync
+// is missing or older than the fantasy freshness threshold.
+func (service *MatchupService) ensureFreshYahoo() error {
+	if service.ArchivedSeason > 0 || service.AutoSync == nil {
+		return nil
+	}
+	needs, err := service.Store.NeedsSyncItem("yahoo_public", "fantasy", service.League, store.ItemRefreshPolicy{TTL: fantasyFreshnessTTL, PipelineVersion: syncPipelineVersion})
+	if err != nil || !needs {
+		return nil
+	}
+	syncErr := service.AutoSync()
+	if syncErr == nil {
+		return nil
+	}
+	state, stateErr := service.Store.SyncItemState("yahoo_public", "fantasy", service.League)
+	if stateErr == nil && state != nil && state.LastSuccessfulAt != nil {
+		return nil
+	}
+	return fmt.Errorf("match: Yahoo sync failed (%v) and no prior sync data exists; check connectivity and run skout sync", syncErr)
 }
 
 // NewProductionMatchupService opens public providers and compatible local state.
-func NewProductionMatchupService(version, leagueOverride string, mode terminal.ColorMode) (*MatchupService, error) {
+func NewProductionMatchupService(version, leagueOverride string, seasonOverride int, mode terminal.ColorMode) (*MatchupService, error) {
 	settings, err := config.Read()
 	if err != nil {
 		return nil, fmt.Errorf("match: read configuration: %w", err)
@@ -68,12 +91,27 @@ func NewProductionMatchupService(version, leagueOverride string, mode terminal.C
 	if league == "" {
 		league = strings.TrimSpace(settings.CurrentLeague)
 	}
-	if league == "" {
+	if league == "" && seasonOverride == 0 {
 		return nil, fmt.Errorf("match: no league selected; run skout st -l <key>")
 	}
 	database, err := store.Open()
 	if err != nil {
 		return nil, fmt.Errorf("match: open database: %w", err)
+	}
+	if seasonOverride > 0 {
+		key, live, seasonErr := seasonScopedLeague(database, league, seasonOverride)
+		if seasonErr != nil {
+			_ = database.Close()
+			return nil, fmt.Errorf("match: %w", seasonErr)
+		}
+		if !live {
+			return &MatchupService{
+				Store: database, League: key, TeamKey: settings.CurrentTeamKey,
+				Season: seasonOverride, ArchivedSeason: seasonOverride,
+				PersistTeam: func(string) error { return nil },
+				Now:         time.Now, Mode: mode,
+			}, nil
+		}
 	}
 	season, err := database.FantasySeason(league)
 	if err != nil || season == nil {
@@ -137,13 +175,24 @@ func (service *MatchupService) Matchup(options MatchupOptions) (string, error) {
 	if options.Week < 0 || options.Week > 0 && (options.Weekly || options.Day != "") || options.Weekly && options.Day != "" {
 		return "", fmt.Errorf("match: select only one period")
 	}
+	if service.ArchivedSeason > 0 {
+		if options.Day != "" {
+			return "", fmt.Errorf("match: the daily view is unavailable for an archived season; use --week or --weekly")
+		}
+		if options.Week == 0 {
+			options.Weekly = true
+		}
+	}
+	if err := service.ensureFreshYahoo(); err != nil {
+		return "", err
+	}
 	teams, err := service.Store.FantasyTeams(service.League)
 	if err != nil {
 		return "", fantasyError("match", "read teams", err)
 	}
 	selected, err := selectFantasyTeam(teams, service.TeamKey, options.Team)
 	if err != nil {
-		return "", fmt.Errorf("match: %w", err)
+		return "", fmt.Errorf("match: %w", service.archivedMatchupTeamHint(teams, err))
 	}
 	changedTeam := options.Team != "" && selected.TeamKey != service.TeamKey
 	if changedTeam && service.PersistTeam == nil {
@@ -177,7 +226,10 @@ func (service *MatchupService) Matchup(options MatchupOptions) (string, error) {
 		}
 		period.preferSnapshot = true
 	}
-	view, err := service.acquire(period, selected, teams)
+	if service.ArchivedSeason > 0 {
+		period.preferSnapshot, period.gameContext, period.daily = true, false, false
+	}
+	view, err := service.acquire(period, selected, teams, service.startPrefetch(period))
 	var output string
 	if err == nil {
 		output = display.RenderMatchup(view, service.Mode)
@@ -191,6 +243,9 @@ func (service *MatchupService) Matchup(options MatchupOptions) (string, error) {
 		}
 		output = display.RenderLocalMatchup(local, service.Mode)
 	}
+	if service.ArchivedSeason > 0 {
+		output = display.ArchivedNotice(service.ArchivedSeason, service.Mode) + output
+	}
 	if changedTeam {
 		if err := service.PersistTeam(selected.TeamKey); err != nil {
 			return "", fantasyError("match", "save selected team", err)
@@ -198,6 +253,26 @@ func (service *MatchupService) Matchup(options MatchupOptions) (string, error) {
 		service.TeamKey = selected.TeamKey
 	}
 	return output, nil
+}
+
+// matchupFantasyPlayers reads league players, pinning stats to the archived season when one is selected.
+func (service *MatchupService) matchupFantasyPlayers() ([]domain.StoredFantasyPlayer, error) {
+	if service.ArchivedSeason > 0 {
+		return service.Store.FantasyPlayersForSeason(service.League, service.ArchivedSeason)
+	}
+	return service.Store.FantasyPlayers(service.League)
+}
+
+// archivedMatchupTeamHint appends the archived season's team list to a failed team match.
+func (service *MatchupService) archivedMatchupTeamHint(teams []store.StoredFantasyTeam, err error) error {
+	if service.ArchivedSeason == 0 || len(teams) == 0 {
+		return err
+	}
+	names := make([]string, 0, len(teams))
+	for _, team := range teams {
+		names = append(names, team.Name)
+	}
+	return fmt.Errorf("%v (archived season %d teams: %s)", err, service.ArchivedSeason, strings.Join(names, ", "))
 }
 
 type matchupPeriod struct {
@@ -209,10 +284,50 @@ type matchupPeriod struct {
 	gameContext    bool
 }
 
-func (service *MatchupService) acquire(period matchupPeriod, selected store.StoredFantasyTeam, storedTeams []store.StoredFantasyTeam) (domain.MatchupView, error) {
+type matchupScheduleResult struct {
+	games []providers.ScheduleGame
+	err   error
+}
+
+type matchupOddsResult struct {
+	lines providers.ESPNSlateLines
+	err   error
+}
+
+// matchupPrefetch carries schedule and odds fetches started concurrently with
+// the Yahoo matchup acquisition.
+type matchupPrefetch struct {
+	schedule chan matchupScheduleResult
+	odds     chan matchupOddsResult
+}
+
+// startPrefetch begins the game-context provider fetches so they overlap the
+// Yahoo matchup fetch instead of running serially after it.
+func (service *MatchupService) startPrefetch(period matchupPeriod) *matchupPrefetch {
+	prefetch := &matchupPrefetch{}
+	if !period.gameContext || service.Schedule == nil {
+		return prefetch
+	}
+	day := period.day
+	prefetch.schedule = make(chan matchupScheduleResult, 1)
+	go func() {
+		games, err := service.Schedule(day)
+		prefetch.schedule <- matchupScheduleResult{games: games, err: err}
+	}()
+	if service.Odds != nil {
+		prefetch.odds = make(chan matchupOddsResult, 1)
+		go func() {
+			lines, err := service.Odds(service.now())
+			prefetch.odds <- matchupOddsResult{lines: lines, err: err}
+		}()
+	}
+	return prefetch
+}
+
+func (service *MatchupService) acquire(period matchupPeriod, selected store.StoredFantasyTeam, storedTeams []store.StoredFantasyTeam, prefetch *matchupPrefetch) (domain.MatchupView, error) {
 	if period.scope == "current" {
 		if view, ok := service.freshDefault(period, selected, storedTeams); ok {
-			return service.enrichView(view, period)
+			return service.enrichView(view, period, prefetch)
 		}
 		leagueID, err := providers.LeagueIDFromKey(service.League)
 		if err != nil {
@@ -225,7 +340,7 @@ func (service *MatchupService) acquire(period matchupPeriod, selected store.Stor
 		if err != nil {
 			if view, ok := service.staleDefault(period, selected, storedTeams); ok {
 				view.Stale = true
-				return service.enrichView(view, period)
+				return service.enrichView(view, period, prefetch)
 			}
 			return domain.MatchupView{}, yahooUnavailable(err)
 		}
@@ -236,7 +351,7 @@ func (service *MatchupService) acquire(period matchupPeriod, selected store.Stor
 		if err := service.saveMatchupSnapshots("yahoo_public", "v1", period, matchup, mine, opponent); err != nil {
 			return domain.MatchupView{}, err
 		}
-		return service.enrichView(domain.MatchupView{Matchup: matchup, Mine: mine, Opponent: opponent, Teams: feed.Teams}, period)
+		return service.enrichView(domain.MatchupView{Matchup: matchup, Mine: mine, Opponent: opponent, Teams: feed.Teams}, period, prefetch)
 	}
 	matchups, stale, err := service.scoreboard(period.week, period.preferSnapshot)
 	if err != nil {
@@ -269,7 +384,7 @@ func (service *MatchupService) acquire(period matchupPeriod, selected store.Stor
 		return domain.MatchupView{}, err
 	}
 	view := domain.MatchupView{Matchup: *matchup, Mine: mine, Opponent: opponent, Teams: fantasyTeamsFromStore(storedTeams), Stale: stale || mineStale || opponentStale}
-	return service.enrichView(view, period)
+	return service.enrichView(view, period, prefetch)
 }
 
 func (service *MatchupService) scoreboard(week int, preferSnapshot bool) ([]domain.Matchup, bool, error) {
@@ -451,21 +566,24 @@ func (service *MatchupService) saveMatchupSnapshots(source, version string, peri
 	return nil
 }
 
-func (service *MatchupService) enrichView(view domain.MatchupView, period matchupPeriod) (domain.MatchupView, error) {
+func (service *MatchupService) enrichView(view domain.MatchupView, period matchupPeriod, prefetch *matchupPrefetch) (domain.MatchupView, error) {
 	if period.daily {
 		if err := service.overlayDaily(&view, period.day); err != nil {
 			return domain.MatchupView{}, err
 		}
 	}
-	if period.gameContext && service.Schedule != nil {
-		if games, err := service.Schedule(period.day); err == nil {
+	if period.gameContext && prefetch != nil && prefetch.schedule != nil {
+		if schedule := <-prefetch.schedule; schedule.err == nil {
+			games := schedule.games
+			var local []domain.StoredFantasyPlayer
 			identities := map[int64]int64{}
-			if local, readErr := service.Store.FantasyPlayers(service.League); readErr == nil {
-				identities = fantasyIdentityMap(local)
+			if players, readErr := service.matchupFantasyPlayers(); readErr == nil {
+				local = players
+				identities = fantasyIdentityMap(players)
 			}
 			applyMatchupGameStatus(view.Mine.Players, games, identities)
 			applyMatchupGameStatus(view.Opponent.Players, games, identities)
-			view.Odds = service.matchupOdds(games, view)
+			view.Odds = service.matchupOdds(games, view, local, prefetch)
 		}
 	}
 	return view, nil
@@ -531,14 +649,15 @@ func (service *MatchupService) overlayDaily(view *domain.MatchupView, day string
 	return nil
 }
 
-func (service *MatchupService) matchupOdds(games []providers.ScheduleGame, view domain.MatchupView) []domain.MatchupOdds {
-	if service.Odds == nil {
+func (service *MatchupService) matchupOdds(games []providers.ScheduleGame, view domain.MatchupView, players []domain.StoredFantasyPlayer, prefetch *matchupPrefetch) []domain.MatchupOdds {
+	if prefetch == nil || prefetch.odds == nil {
 		return nil
 	}
-	lines, err := service.Odds(service.now())
-	if err != nil {
+	odds := <-prefetch.odds
+	if odds.err != nil {
 		return nil
 	}
+	lines := odds.lines
 	var output []domain.MatchupOdds
 	for _, game := range games {
 		var line *providers.ESPNGameLine
@@ -560,14 +679,13 @@ func (service *MatchupService) matchupOdds(games []providers.ScheduleGame, view 
 			if candidate.id == nil {
 				continue
 			}
-			mine := rosterHasMLBIdentity(service.Store, service.League, view.Mine.Players, *candidate.id)
-			opponent := rosterHasMLBIdentity(service.Store, service.League, view.Opponent.Players, *candidate.id)
+			mine := rosterHasMLBIdentity(players, view.Mine.Players, *candidate.id)
+			opponent := rosterHasMLBIdentity(players, view.Opponent.Players, *candidate.id)
 			if !mine && !opponent {
 				continue
 			}
 			percent := int(math.Round(candidate.probability * 100))
-			filled := min(10, (percent+5)/10)
-			line := fmt.Sprintf("%s v %s  %-7s  %s%s %d%%", oddsName(candidate.name), oddsName(candidate.opponent), MLBTeamAbbreviation(game.AwayTeamID)+"@"+MLBTeamAbbreviation(game.HomeTeamID), strings.Repeat("█", filled), strings.Repeat("░", 10-filled), percent)
+			line := fmt.Sprintf("%s v %s  %-7s  %s", oddsName(candidate.name), oddsName(candidate.opponent), MLBTeamAbbreviation(game.AwayTeamID)+"@"+MLBTeamAbbreviation(game.HomeTeamID), display.OddsBar(&percent, service.Mode))
 			output = append(output, domain.MatchupOdds{Mine: mine, Line: line})
 		}
 	}
@@ -590,7 +708,7 @@ func (service *MatchupService) weekForDay(day string, current int, team string) 
 }
 
 func (service *MatchupService) localFallback(selected store.StoredFantasyTeam) (domain.LocalMatchupView, error) {
-	players, err := service.Store.FantasyPlayers(service.League)
+	players, err := service.matchupFantasyPlayers()
 	if err != nil {
 		return domain.LocalMatchupView{}, err
 	}
@@ -725,10 +843,14 @@ func applyMatchupGameStatus(players []domain.PlayerWeekStats, games []providers.
 			} else if player.GameIndicator.Kind == domain.GameIndicatorStartingPitcher || player.GameIndicator.Kind == domain.GameIndicatorOutOfLineup {
 				marker = "●"
 			}
+			location := "v " + MLBTeamAbbreviation(game.AwayTeamID)
+			if away {
+				location = "@ " + MLBTeamAbbreviation(game.HomeTeamID)
+			}
 			if strings.EqualFold(game.DetailedState, "Final") {
-				player.InjuryStatus = "Final"
-			} else if game.Linescore != nil {
-				player.InjuryStatus = strings.TrimSpace(firstRune(game.Linescore.InningState) + game.Linescore.InningOrdinal + " " + marker)
+				player.InjuryStatus = "Final " + location
+			} else if !gameNotStarted(game.DetailedState) && game.Linescore != nil {
+				player.InjuryStatus = joinStatusParts(firstRune(game.Linescore.InningState)+game.Linescore.InningOrdinal, marker, location)
 			} else {
 				gameTime := game.GameDate
 				if parsed, err := time.Parse(time.RFC3339, game.GameDate); err == nil {
@@ -737,18 +859,25 @@ func applyMatchupGameStatus(players []domain.PlayerWeekStats, games []providers.
 				if gameTime == "" {
 					gameTime = "Scheduled"
 				}
-				player.InjuryStatus = strings.TrimSpace(gameTime + " " + marker)
+				player.InjuryStatus = joinStatusParts(gameTime, marker, location)
 			}
 			break
 		}
 	}
 }
 
-func rosterHasMLBIdentity(database *store.Store, league string, roster []domain.PlayerWeekStats, id int64) bool {
-	players, err := database.FantasyPlayers(league)
-	if err != nil {
-		return false
+// joinStatusParts joins the non-empty status fragments with single spaces.
+func joinStatusParts(parts ...string) string {
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			filtered = append(filtered, part)
+		}
 	}
+	return strings.Join(filtered, " ")
+}
+
+func rosterHasMLBIdentity(players []domain.StoredFantasyPlayer, roster []domain.PlayerWeekStats, id int64) bool {
 	yahoo := map[int64]struct{}{}
 	for _, player := range roster {
 		yahoo[player.YahooPlayerID] = struct{}{}

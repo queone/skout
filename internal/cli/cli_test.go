@@ -48,23 +48,23 @@ func TestFantasyContractDispatchesEveryValueOnce(t *testing.T) {
 		t.Run(test.Name, func(t *testing.T) {
 			calls := 0
 			handlers := Handlers{
-				Matchup: func(league, team string, week int, weekly bool, day string, debug bool) (string, error) {
+				Matchup: func(league, team string, week int, weekly bool, day string, _ int, debug bool) (string, error) {
 					calls++
 					return strings.Join([]string{"m", league, team, strconv.Itoa(week), boolText(weekly), day, boolText(debug)}, ":") + "\n", nil
 				},
-				Roster: func(league, team string, debug bool) (string, error) {
+				Roster: func(league, team string, _ int, debug bool) (string, error) {
 					calls++
 					return strings.Join([]string{"r", league, team, boolText(debug)}, ":") + "\n", nil
 				},
-				RosterTotals: func(league, weekly string, debug bool) (string, error) {
+				RosterTotals: func(league, weekly string, _ int, debug bool) (string, error) {
 					calls++
 					return strings.Join([]string{"rt", league, weekly, boolText(debug)}, ":") + "\n", nil
 				},
-				Hitters: func(league, argument, sort, position string, waiver, debug bool) (string, error) {
+				Hitters: func(league, argument, sort, position string, waiver bool, _ int, debug bool) (string, error) {
 					calls++
 					return strings.Join([]string{"h", league, argument, sort, position, boolText(waiver), boolText(debug)}, ":") + "\n", nil
 				},
-				Pitchers: func(league, argument, sort, position string, waiver, debug bool) (string, error) {
+				Pitchers: func(league, argument, sort, position string, waiver bool, _ int, debug bool) (string, error) {
 					calls++
 					if argument == "fail" {
 						return "", errors.New("injected pitcher failure")
@@ -85,9 +85,50 @@ func TestMatchupSyntaxRejectsBeforeHandler(t *testing.T) {
 	for _, args := range [][]string{{"m", "-w", "0"}, {"m", "-D", "Feb-30"}, {"m", "-W", "-D", "Apr-01"}} {
 		called := false
 		var stdout, stderr bytes.Buffer
-		code := Run(args, "0.4.0", Context{Stdout: &stdout, Stderr: &stderr}, Handlers{Matchup: func(string, string, int, bool, string, bool) (string, error) { called = true; return "", nil }})
+		code := Run(args, "0.4.0", Context{Stdout: &stdout, Stderr: &stderr}, Handlers{Matchup: func(string, string, int, bool, string, int, bool) (string, error) { called = true; return "", nil }})
 		if code != 2 || called || stdout.Len() != 0 || !strings.Contains(stderr.String(), "error:") {
 			t.Fatalf("args=%v code=%d called=%v stdout=%q stderr=%q", args, code, called, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestSeasonFlagDispatchesAndValidates(t *testing.T) {
+	handlers := Handlers{
+		Matchup: func(_, _ string, _ int, _ bool, _ string, season int, _ bool) (string, error) {
+			return "m:" + strconv.Itoa(season), nil
+		},
+		Roster:       func(_, _ string, season int, _ bool) (string, error) { return "r:" + strconv.Itoa(season), nil },
+		RosterTotals: func(_, _ string, season int, _ bool) (string, error) { return "rt:" + strconv.Itoa(season), nil },
+		Hitters: func(_, _, _, _ string, _ bool, season int, _ bool) (string, error) {
+			return "h:" + strconv.Itoa(season), nil
+		},
+		Pitchers: func(_, _, _, _ string, _ bool, season int, _ bool) (string, error) {
+			return "p:" + strconv.Itoa(season), nil
+		},
+	}
+	for _, test := range []struct {
+		args   []string
+		expect string
+	}{
+		{[]string{"r", "-S", "2026"}, "r:2026"},
+		{[]string{"rt", "--season", "2026"}, "rt:2026"},
+		{[]string{"m", "-S", "2026"}, "m:2026"},
+		{[]string{"h", "-S", "2026"}, "h:2026"},
+		{[]string{"p", "-S", "2026"}, "p:2026"},
+		{[]string{"r"}, "r:0"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := Run(test.args, "0.4.0", Context{Stdout: &stdout, Stderr: &stderr}, handlers)
+		if code != 0 || stdout.String() != test.expect || stderr.Len() != 0 {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", test.args, code, stdout.String(), stderr.String())
+		}
+	}
+	for _, args := range [][]string{{"r", "-S", "abc"}, {"r", "-S", "0"}} {
+		var stdout, stderr bytes.Buffer
+		called := false
+		code := Run(args, "0.4.0", Context{Stdout: &stdout, Stderr: &stderr}, Handlers{Roster: func(string, string, int, bool) (string, error) { called = true; return "", nil }})
+		if code != 2 || called || !strings.Contains(stderr.String(), "error:") {
+			t.Fatalf("args=%v code=%d called=%v stderr=%q", args, code, called, stderr.String())
 		}
 	}
 }

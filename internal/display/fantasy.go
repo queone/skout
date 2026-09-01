@@ -15,6 +15,18 @@ import (
 
 const fantasyPlayerWidth = 26
 
+// statusSlotEntry reports whether one eligible-position entry is an injury or
+// inactive status rather than a real position.
+func statusSlotEntry(value string) bool {
+	upper := strings.ToUpper(value)
+	return upper == "NA" || strings.HasPrefix(upper, "IL")
+}
+
+// ArchivedNotice labels output rendered from a frozen archived season.
+func ArchivedNotice(season int, mode terminal.ColorMode) string {
+	return terminal.Warning(fmt.Sprintf("ARCHIVED — season %d data frozen at season end.", season), mode) + "\n"
+}
+
 // RenderFantasyPlayers renders a roster or a single-role player pool.
 func RenderFantasyPlayers(title string, players []domain.StoredFantasyPlayer, mode terminal.ColorMode) string {
 	roster := title != "HITTERS" && title != "PITCHERS"
@@ -128,13 +140,29 @@ func fantasyPoolRow(player domain.StoredFantasyPlayer, mode terminal.ColorMode) 
 		owner = "<not yet in Yahoo>"
 	}
 	identity := fantasyFit(strings.TrimSpace(player.Name+" "+player.Team), fantasyPlayerWidth)
+	ownerCell := fantasyOwnerCell(owner, mode)
+	var row string
 	if player.Role == "P" {
 		advanced := []string{fantasyOptional(player.PitchingAdvanced[0], 5, 1, false), fantasyOptional(player.PitchingAdvanced[1], 6, 1, true), fantasyOptional(player.PitchingAdvanced[2], 5, 1, true), fantasyOptional(player.PitchingAdvanced[3], 5, 1, true), fantasyOptional(player.PitchingAdvanced[4], 5, 1, true), fantasyOptional(player.PitchingAdvanced[5], 5, 1, true)}
-		return fmt.Sprintf("%s  %s  %s  %s  %4s  %4s  %s  %5.1f  %4.0f  %3.0f  %3.0f  %4.0f  %5.2f  %5.2f  %s", identity, FantasyPositions(player.Positions, player.IsCloser), status, hand, rank, ecr, strings.Join(advanced, "  "), player.Pitching[0], player.Pitching[1], player.Pitching[2], player.Pitching[3], player.Pitching[4], player.Pitching[5], player.Pitching[6], terminal.Dim(strings.TrimRight(fantasyFit(owner, 20), " "), mode))
+		row = fmt.Sprintf("%s  %s  %s  %s  %4s  %4s  %s  %5.1f  %4.0f  %3.0f  %3.0f  %4.0f  %5.2f  %5.2f  %s", identity, FantasyPositions(player.Positions, player.IsCloser), status, hand, rank, ecr, strings.Join(advanced, "  "), player.Pitching[0], player.Pitching[1], player.Pitching[2], player.Pitching[3], player.Pitching[4], player.Pitching[5], player.Pitching[6], ownerCell)
+	} else {
+		advanced := []string{fantasyOptional(player.HittingAdvanced[0], 6, 3, false), fantasyOptional(player.HittingAdvanced[1], 5, 1, false), fantasyOptional(player.HittingAdvanced[2], 5, 1, true), fantasyOptional(player.HittingAdvanced[3], 5, 1, true), fantasyOptional(player.HittingAdvanced[4], 5, 1, true), fantasyOptional(player.HittingAdvanced[5], 5, 1, true), fantasyOptional(player.HittingAdvanced[6], 5, 1, false)}
+		ops := fantasyOptional(player.HittingAdvanced[7], 5, 3, false)
+		row = fmt.Sprintf("%s  %s  %s  %s  %4s  %4s  %s  %5.0f  %5s  %5s  %3.0f  %3.0f  %4.0f  %4.0f  %5s  %s", identity, FantasyPositions(player.Positions, player.IsCloser), status, hand, rank, ecr, strings.Join(advanced, "  "), player.Batting[0], fantasyRate(player.Batting[1], 3), ops, player.Batting[2], player.Batting[3], player.Batting[4], player.Batting[5], fantasyRate(player.Batting[6], 3), ownerCell)
 	}
-	advanced := []string{fantasyOptional(player.HittingAdvanced[0], 6, 3, false), fantasyOptional(player.HittingAdvanced[1], 5, 1, false), fantasyOptional(player.HittingAdvanced[2], 5, 1, true), fantasyOptional(player.HittingAdvanced[3], 5, 1, true), fantasyOptional(player.HittingAdvanced[4], 5, 1, true), fantasyOptional(player.HittingAdvanced[5], 5, 1, true), fantasyOptional(player.HittingAdvanced[6], 5, 1, false)}
-	ops := fantasyOptional(player.HittingAdvanced[7], 5, 3, false)
-	return fmt.Sprintf("%s  %s  %s  %s  %4s  %4s  %s  %5.0f  %5s  %5s  %3.0f  %3.0f  %4.0f  %4.0f  %5s  %s", identity, FantasyPositions(player.Positions, player.IsCloser), status, hand, rank, ecr, strings.Join(advanced, "  "), player.Batting[0], fantasyRate(player.Batting[1], 3), ops, player.Batting[2], player.Batting[3], player.Batting[4], player.Batting[5], fantasyRate(player.Batting[6], 3), terminal.Dim(strings.TrimRight(fantasyFit(owner, 20), " "), mode))
+	if strings.HasPrefix(player.Status, "IL") {
+		return terminal.Warning(row, mode)
+	}
+	return row
+}
+
+// fantasyOwnerCell renders availability in green and every other owner subdued.
+func fantasyOwnerCell(owner string, mode terminal.ColorMode) string {
+	value := strings.TrimRight(fantasyFit(owner, 20), " ")
+	if owner == "<available>" {
+		return terminal.Good(value, mode)
+	}
+	return terminal.Dim(value, mode)
 }
 
 func fantasyTotalRow(role string, players []domain.StoredFantasyPlayer) string {
@@ -179,7 +207,7 @@ func RenderLeagueTotals(teams []store.StoredFantasyTeam, players []domain.Stored
 	for _, team := range teams {
 		width = max(width, utf8.RuneCountInString(team.Name))
 	}
-	header := fmt.Sprintf("%-*s  %4s  %9s  %5s  %5s  %5s  %4s  %5s  %5s  %3s  %3s  %3s  %3s  %5s  %6s  %3s  %3s  %4s  %5s  %5s", width, "TEAM", "RANK", "WLT", "PCT", "GB", "BDGT", "WVR", "MOVES", "PA", "R", "HR", "RBI", "SB", "AVG", "IP", "W", "SV", "K", "ERA", "WHIP")
+	header := fmt.Sprintf("%-*s  %4s  %10s  %5s  %5s  %5s  %4s  %5s  %5s  %3s  %3s  %3s  %3s  %5s  %6s  %3s  %3s  %4s  %5s  %5s", width, "TEAM", "RANK", "WLT", "PCT", "GB", "BDGT", "WVR", "MOVES", "PA", "R", "HR", "RBI", "SB", "AVG", "IP", "W", "SV", "K", "ERA", "WHIP")
 	leaderWins, leaderLosses := int64(0), int64(0)
 	for _, team := range teams {
 		if team.Wins > leaderWins {
@@ -232,7 +260,11 @@ func RenderLeagueTotals(teams []store.StoredFantasyTeam, players []domain.Stored
 		if team.Rank > 0 {
 			rank = strconv.FormatInt(team.Rank, 10)
 		}
-		fmt.Fprintf(&output, "%-*s  %4s  %9s  %5s  %5s  $%4d  %4d  %5d  %5.0f  %3.0f  %3.0f  %3.0f  %3.0f  %5s  %6.1f  %3.0f  %3.0f  %4.0f  %5.2f  %5.2f\n", width, team.Name, rank, wlt, pct, behind, team.FAABBalance, team.WaiverPriority, team.Moves, batting[0], batting[2], batting[3], batting[4], batting[5], fantasyRateOrDash(batting[6], 3), pitching[0], pitching[2], pitching[3], pitching[4], pitching[5], pitching[6])
+		context := fmt.Sprintf("%-*s  %4s  %10s  %5s  %5s  $%4d  %4d  %5d  %5.0f", width, team.Name, rank, wlt, pct, behind, team.FAABBalance, team.WaiverPriority, team.Moves, batting[0])
+		battingCategories := fmt.Sprintf("%3.0f  %3.0f  %3.0f  %3.0f  %5s", batting[2], batting[3], batting[4], batting[5], fantasyRateOrDash(batting[6], 3))
+		innings := fmt.Sprintf("%6.1f", pitching[0])
+		pitchingCategories := fmt.Sprintf("%3.0f  %3.0f  %4.0f  %5.2f  %5.2f", pitching[2], pitching[3], pitching[4], pitching[5], pitching[6])
+		fmt.Fprintf(&output, "%s  %s  %s  %s\n", terminal.Dim(context, mode), terminal.Bold(battingCategories, mode), terminal.Dim(innings, mode), terminal.Bold(pitchingCategories, mode))
 	}
 	return output.String()
 }
@@ -342,7 +374,7 @@ func FantasyPositions(value string, closer bool) string {
 	positions := all[:0]
 	for _, item := range all {
 		item = strings.TrimSpace(item)
-		if item != "" && !strings.EqualFold(item, "uti") && !strings.EqualFold(item, "util") && !strings.EqualFold(item, "p") {
+		if item != "" && !strings.EqualFold(item, "uti") && !strings.EqualFold(item, "util") && !strings.EqualFold(item, "p") && !statusSlotEntry(item) {
 			positions = append(positions, item)
 		}
 	}
@@ -400,7 +432,13 @@ func fantasyIndicator(status string, indicator domain.GameIndicator, subdued boo
 		return status
 	}
 	styled := terminal.LineupIndicator(marker, indicator.Kind != domain.GameIndicatorOutOfLineup, subdued, mode)
-	return strings.Replace(status, " "+marker+" ", " "+styled+" ", 1)
+	if replaced := strings.Replace(status, " "+marker+" ", " "+styled+" ", 1); replaced != status {
+		return replaced
+	}
+	if strings.HasPrefix(status, marker+" ") {
+		return styled + strings.TrimPrefix(status, marker)
+	}
+	return status
 }
 
 func fantasyOptional(value *float64, width, precision int, percent bool) string {

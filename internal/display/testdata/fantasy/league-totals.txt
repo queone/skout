@@ -1,2 +1,2 @@
-TEAM       RANK        WLT    PCT     GB   BDGT   WVR  MOVES     PA    R   HR  RBI   SB    AVG      IP    W   SV     K    ERA   WHIP
-Operators     1      4-2-0   .667      —  $  65     2      7    100   20    5   18    3   .280    60.0    5    0    70   3.20   1.10
+TEAM       RANK         WLT    PCT     GB   BDGT   WVR  MOVES     PA    R   HR  RBI   SB    AVG      IP    W   SV     K    ERA   WHIP
+Operators     1       4-2-0   .667      —  $  65     2      7    100   20    5   18    3   .280    60.0    5    0    70   3.20   1.10

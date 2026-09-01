@@ -66,6 +66,102 @@ func TestMatchupDefaultFetchesRedzoneOncePersistsExactSnapshotsAndOverlays(t *te
 	}
 }
 
+func TestMatchupPrefetchesScheduleAndOddsBeforeYahooCompletes(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	service := matchupServiceForTest(t, now)
+	defer service.Close()
+	scheduleStarted := make(chan struct{})
+	oddsStarted := make(chan struct{})
+	service.Schedule = func(string) ([]providers.ScheduleGame, error) { close(scheduleStarted); return nil, nil }
+	service.Odds = func(time.Time) (providers.ESPNSlateLines, error) {
+		close(oddsStarted)
+		return providers.ESPNSlateLines{}, nil
+	}
+	original := service.FetchRedzone
+	service.FetchRedzone = func(id, league string) (providers.RedzoneFeed, error) {
+		<-scheduleStarted
+		<-oddsStarted
+		return original(id, league)
+	}
+	if _, err := service.Matchup(MatchupOptions{}); err != nil {
+		t.Fatalf("overlapped matchup err=%v", err)
+	}
+}
+
+func TestScheduledGamesWithLinescoreStubsShowGameTimesNotEmptyStatus(t *testing.T) {
+	players := []domain.PlayerWeekStats{
+		{YahooPlayerID: 101, Name: "Ada Hitter", Team: "NYY", PositionType: "B"},
+		{YahooPlayerID: 102, Name: "Live Hitter", Team: "BOS", PositionType: "B"},
+	}
+	games := []providers.ScheduleGame{
+		{GameID: 1, AwayTeamID: 147, HomeTeamID: 139, DetailedState: "Scheduled", GameDate: "2026-09-01T23:40:00Z", Linescore: &providers.Linescore{}},
+		{GameID: 2, AwayTeamID: 111, HomeTeamID: 121, DetailedState: "In Progress", GameDate: "2026-09-01T17:10:00Z", Linescore: &providers.Linescore{InningState: "Top", InningOrdinal: "3rd"}},
+	}
+	applyMatchupGameStatus(players, games, map[int64]int64{})
+	if players[0].InjuryStatus == "" || strings.Contains(players[0].InjuryStatus, "3rd") || !strings.HasSuffix(players[0].InjuryStatus, "@ TB") {
+		t.Fatalf("scheduled status=%q", players[0].InjuryStatus)
+	}
+	if players[1].InjuryStatus != "T3rd @ NYM" {
+		t.Fatalf("live status=%q", players[1].InjuryStatus)
+	}
+}
+
+func TestMatchupEnforcesTheSixHourAutoSyncGate(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	service := matchupServiceForTest(t, now)
+	defer service.Close()
+	calls := 0
+	service.AutoSync = func() error {
+		calls++
+		return service.Store.MarkSyncItemSuccess("yahoo_public", "fantasy", "mlb.l.1", syncPipelineVersion)
+	}
+	if _, err := service.Matchup(MatchupOptions{}); err != nil || calls != 1 {
+		t.Fatalf("missing sync state: calls=%d err=%v", calls, err)
+	}
+	if _, err := service.Matchup(MatchupOptions{}); err != nil || calls != 1 {
+		t.Fatalf("fresh sync state: calls=%d err=%v", calls, err)
+	}
+}
+
+func TestArchivedSeasonMatchupServesStoredWeeklyPayloadsWithoutProviders(t *testing.T) {
+	now := time.Date(2027, 5, 1, 12, 0, 0, 0, time.UTC)
+	database := fantasyAppStore(t, now)
+	feed := matchupFeed()
+	scoreboard, err := json.Marshal(feed.Matchups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SaveCommandSnapshot("match_scoreboard", "yahoo", "mlb.l.1:7", "v1", string(scoreboard)); err != nil {
+		t.Fatal(err)
+	}
+	for _, team := range []string{"mlb.l.1.t.1", "mlb.l.1.t.2"} {
+		payload, rosterErr := json.Marshal(feed.RosterWeekStats[team])
+		if rosterErr != nil {
+			t.Fatal(rosterErr)
+		}
+		if err := database.SaveCommandSnapshot("match_roster", "yahoo", team+":7", "v2", string(payload)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := &MatchupService{
+		Store: database, League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", Season: 2026, ArchivedSeason: 2026,
+		PersistTeam: func(string) error { return nil },
+		Now:         func() time.Time { return now }, Mode: terminal.Plain,
+	}
+	defer service.Close()
+	output, err := service.Matchup(MatchupOptions{})
+	if err != nil || !strings.Contains(output, "ARCHIVED — season 2026") || !strings.Contains(output, "MATCHUP WEEK:") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	if _, err := service.Matchup(MatchupOptions{Day: "2026-08-25"}); err == nil || !strings.Contains(err.Error(), "archived season") {
+		t.Fatalf("daily error=%v", err)
+	}
+	week, err := service.Matchup(MatchupOptions{Week: 7})
+	if err != nil || !strings.Contains(week, "ARCHIVED — season 2026") {
+		t.Fatalf("week output=%q err=%v", week, err)
+	}
+}
+
 func TestMatchupValidationPrecedesProvidersAndNamedTeamPersistsOnlyOnSuccess(t *testing.T) {
 	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	service := matchupServiceForTest(t, now)

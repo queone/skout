@@ -35,14 +35,14 @@ type Handlers struct {
 	Status       func(league string) (string, error)
 	Sync         func(league, team string, debug bool, output io.Writer) (string, error)
 	Reset        func(input io.Reader, output io.Writer) error
-	Matchup      func(league, team string, week int, weekly bool, day string, debug bool) (string, error)
+	Matchup      func(league, team string, week int, weekly bool, day string, season int, debug bool) (string, error)
 	Teams        func(team string, force, debug bool) (string, error)
 	Totals       func(force, debug bool) (string, error)
 	Probables    func(force, debug bool) (string, error)
-	Roster       func(league, team string, debug bool) (string, error)
-	RosterTotals func(league, weekly string, debug bool) (string, error)
-	Hitters      func(league, argument, sort, position string, waiver, debug bool) (string, error)
-	Pitchers     func(league, argument, sort, position string, waiver, debug bool) (string, error)
+	Roster       func(league, team string, season int, debug bool) (string, error)
+	RosterTotals func(league, weekly string, season int, debug bool) (string, error)
+	Hitters      func(league, argument, sort, position string, waiver bool, season int, debug bool) (string, error)
+	Pitchers     func(league, argument, sort, position string, waiver bool, season int, debug bool) (string, error)
 }
 
 type flagSpec struct {
@@ -63,19 +63,23 @@ var commands = []commandSpec{
 	{name: "st", label: "st", description: "Show status"},
 	{name: "sync", label: "sync", description: "Synchronize the selected league", flags: []flagSpec{{"-T", "--team", "TEAM", "Select the primary fantasy team", false}}},
 	{name: "reset", label: "reset", description: "Delete the local skout database"},
-	{name: "m", label: "m [team]", description: "Show a daily or weekly matchup", positional: "NAME", maximum: 1, flags: []flagSpec{{"-w", "--week", "WEEK", "Show a specific matchup week", false}, {"-W", "--weekly", "", "Show weekly running totals", false}, {"-D", "--day", "MMM-DD", "Show stats for a specific day", false}}},
+	{name: "m", label: "m [team]", description: "Show a daily or weekly matchup", positional: "NAME", maximum: 1, flags: []flagSpec{{"-w", "--week", "WEEK", "Show a specific matchup week", false}, {"-W", "--weekly", "", "Show weekly running totals", false}, {"-D", "--day", "MMM-DD", "Show stats for a specific day", false}, seasonFlag()}},
 	{name: "t", label: "t [team]", description: "Show MLB 40-man rosters", positional: "TEAM", maximum: 1, flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
 	{name: "tt", label: "tt", description: "Show MLB standings and team totals", flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
 	{name: "sp", label: "sp", description: "Show the three-day probable-pitcher slate", flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
-	{name: "r", label: "r [name]", description: "Show a fantasy roster", positional: "NAME", maximum: 1},
-	{name: "rt", label: "rt", description: "Show fantasy roster totals", flags: []flagSpec{{"-w", "--weekly", "WEEK|DATE", "Show current or selected weekly totals", true}}},
+	{name: "r", label: "r [name]", description: "Show a fantasy roster", positional: "NAME", maximum: 1, flags: []flagSpec{seasonFlag()}},
+	{name: "rt", label: "rt", description: "Show fantasy roster totals", flags: []flagSpec{{"-w", "--weekly", "WEEK|DATE", "Show current or selected weekly totals", true}, seasonFlag()}},
 	{name: "h", label: "h [N|name]", description: "Browse hitters or show a player", positional: "N|NAME", maximum: 1, flags: playerFlags()},
 	{name: "p", label: "p [N|name]", description: "Browse pitchers or show a player", positional: "N|NAME", maximum: 1, flags: playerFlags()},
 	{name: "i", label: "i [term]", description: "Look up a term in the skout glossary", positional: "TERM", maximum: 1, aliases: []string{"whatis"}},
 }
 
 func playerFlags() []flagSpec {
-	return []flagSpec{{"-s", "--sort", "FIELD", "Sort by a displayed field", false}, {"-p", "--position", "POS", "Filter by eligible position", false}, {"-w", "--waiver", "", "Show available Yahoo pickup players", false}}
+	return []flagSpec{{"-s", "--sort", "FIELD", "Sort by a displayed field", false}, {"-p", "--position", "POS", "Filter by eligible position", false}, {"-w", "--waiver", "", "Show available Yahoo pickup players", false}, seasonFlag()}
+}
+
+func seasonFlag() flagSpec {
+	return flagSpec{"-S", "--season", "SEASON", "Show an archived season", false}
 }
 
 // ProductionHandlers returns application handlers using only public providers.
@@ -91,20 +95,33 @@ func ProductionHandlers(version string, context Context) Handlers {
 		service.DebugOutput = context.Stderr
 		return run(service)
 	}
-	withFantasy := func(league string, run func(*app.FantasyService) (string, error)) (string, error) {
-		service, err := app.NewProductionFantasyService(version, league, mode)
+	autoSync := func(league string) func() error {
+		return func() error {
+			_, _ = io.WriteString(context.Stderr, "==> Yahoo data is older than 6 hours; syncing first.\n")
+			_, err := app.SyncProduction(app.SyncOptions{
+				Version: version, League: league, Auto: true,
+				Input: context.Stdin, Prompt: context.Prompt, Output: context.Stderr,
+				InputTerminal: context.StdinIsTerminal, PromptTerminal: context.StderrIsTerminal, OutputTerminal: context.StderrIsTerminal,
+			})
+			return err
+		}
+	}
+	withFantasy := func(league string, season int, run func(*app.FantasyService) (string, error)) (string, error) {
+		service, err := app.NewProductionFantasyService(version, league, season, mode)
 		if err != nil {
 			return "", err
 		}
 		defer service.Close()
+		service.AutoSync = autoSync(league)
 		return run(service)
 	}
-	withMatchup := func(league string, run func(*app.MatchupService) (string, error)) (string, error) {
-		service, err := app.NewProductionMatchupService(version, league, mode)
+	withMatchup := func(league string, season int, run func(*app.MatchupService) (string, error)) (string, error) {
+		service, err := app.NewProductionMatchupService(version, league, season, mode)
 		if err != nil {
 			return "", err
 		}
 		defer service.Close()
+		service.AutoSync = autoSync(league)
 		return run(service)
 	}
 	return Handlers{
@@ -120,8 +137,8 @@ func ProductionHandlers(version string, context Context) Handlers {
 		Reset: func(input io.Reader, output io.Writer) error {
 			return app.ResetProduction(input, output, mode)
 		},
-		Matchup: func(league, team string, week int, weekly bool, day string, _ bool) (string, error) {
-			return withMatchup(league, func(service *app.MatchupService) (string, error) {
+		Matchup: func(league, team string, week int, weekly bool, day string, season int, _ bool) (string, error) {
+			return withMatchup(league, season, func(service *app.MatchupService) (string, error) {
 				return service.Matchup(app.MatchupOptions{Team: team, Week: week, Weekly: weekly, Day: day})
 			})
 		},
@@ -134,19 +151,19 @@ func ProductionHandlers(version string, context Context) Handlers {
 		Probables: func(force, debug bool) (string, error) {
 			return withMLB(debug, func(service *app.MLBService) (string, error) { return service.Probables(force) })
 		},
-		Roster: func(league, team string, _ bool) (string, error) {
-			return withFantasy(league, func(service *app.FantasyService) (string, error) { return service.Roster(team) })
+		Roster: func(league, team string, season int, _ bool) (string, error) {
+			return withFantasy(league, season, func(service *app.FantasyService) (string, error) { return service.Roster(team) })
 		},
-		RosterTotals: func(league, weekly string, _ bool) (string, error) {
-			return withFantasy(league, func(service *app.FantasyService) (string, error) { return service.Totals(weekly) })
+		RosterTotals: func(league, weekly string, season int, _ bool) (string, error) {
+			return withFantasy(league, season, func(service *app.FantasyService) (string, error) { return service.Totals(weekly) })
 		},
-		Hitters: func(league, argument, sort, position string, waiver, _ bool) (string, error) {
-			return withFantasy(league, func(service *app.FantasyService) (string, error) {
+		Hitters: func(league, argument, sort, position string, waiver bool, season int, _ bool) (string, error) {
+			return withFantasy(league, season, func(service *app.FantasyService) (string, error) {
 				return service.Pool("B", app.PlayerPoolOptions{Argument: argument, Sort: sort, Position: position, Waiver: waiver})
 			})
 		},
-		Pitchers: func(league, argument, sort, position string, waiver, _ bool) (string, error) {
-			return withFantasy(league, func(service *app.FantasyService) (string, error) {
+		Pitchers: func(league, argument, sort, position string, waiver bool, season int, _ bool) (string, error) {
+			return withFantasy(league, season, func(service *app.FantasyService) (string, error) {
 				return service.Pool("P", app.PlayerPoolOptions{Argument: argument, Sort: sort, Position: position, Waiver: waiver})
 			})
 		},
@@ -270,7 +287,7 @@ func Run(args []string, version string, context Context, handlers Handlers) int 
 		if handlers.Matchup == nil {
 			err = fmt.Errorf("match: runtime is unavailable; reinstall skout")
 		} else {
-			output, err = handlers.Matchup(parsed.league, team, week, parsed.booleans["weekly"], parsed.values["day"], parsed.debug)
+			output, err = handlers.Matchup(parsed.league, team, week, parsed.booleans["weekly"], parsed.values["day"], seasonValue(parsed), parsed.debug)
 		}
 	case "t":
 		team := ""
@@ -298,13 +315,13 @@ func Run(args []string, version string, context Context, handlers Handlers) int 
 		if handlers.Roster == nil {
 			err = fmt.Errorf("roster: runtime is unavailable; reinstall skout")
 		} else {
-			output, err = handlers.Roster(parsed.league, firstPositional(parsed.positionals), parsed.debug)
+			output, err = handlers.Roster(parsed.league, firstPositional(parsed.positionals), seasonValue(parsed), parsed.debug)
 		}
 	case "rt":
 		if handlers.RosterTotals == nil {
 			err = fmt.Errorf("roster totals: runtime is unavailable; reinstall skout")
 		} else {
-			output, err = handlers.RosterTotals(parsed.league, parsed.values["weekly"], parsed.debug)
+			output, err = handlers.RosterTotals(parsed.league, parsed.values["weekly"], seasonValue(parsed), parsed.debug)
 		}
 	case "h", "p":
 		handler := handlers.Hitters
@@ -314,7 +331,7 @@ func Run(args []string, version string, context Context, handlers Handlers) int 
 		if handler == nil {
 			err = fmt.Errorf("player: runtime is unavailable; reinstall skout")
 		} else {
-			output, err = handler(parsed.league, firstPositional(parsed.positionals), parsed.values["sort"], parsed.values["position"], parsed.booleans["waiver"], parsed.debug)
+			output, err = handler(parsed.league, firstPositional(parsed.positionals), parsed.values["sort"], parsed.values["position"], parsed.booleans["waiver"], seasonValue(parsed), parsed.debug)
 		}
 	}
 	if err != nil {
@@ -427,6 +444,15 @@ func parse(args []string) (parsedInvocation, string) {
 	if spec.name == "m" && parsed.values["day"] != "" && !validShortDay(parsed.values["day"]) {
 		return parsedInvocation{}, fmt.Sprintf("error: invalid value '%s' for '--day <MMM-DD>': expected a real date in MMM-DD form\n\nFor more information, try '--help'.\n", parsed.values["day"])
 	}
+	if parsed.values["season"] != "" {
+		season, err := strconv.Atoi(parsed.values["season"])
+		if err != nil {
+			return parsedInvocation{}, fmt.Sprintf("error: invalid value '%s' for '--season <SEASON>': invalid digit found in string\n\nFor more information, try '--help'.\n", parsed.values["season"])
+		}
+		if season <= 0 {
+			return parsedInvocation{}, fmt.Sprintf("error: invalid value '%s' for '--season <SEASON>': value must be positive\n\nFor more information, try '--help'.\n", parsed.values["season"])
+		}
+	}
 	if spec.maximum >= 0 && len(parsed.positionals) > spec.maximum {
 		return parsedInvocation{}, extraPositional(spec, parsed.positionals[spec.maximum])
 	}
@@ -445,6 +471,11 @@ func parse(args []string) (parsedInvocation, string) {
 		}
 	}
 	return parsed, ""
+}
+
+func seasonValue(parsed parsedInvocation) int {
+	season, _ := strconv.Atoi(parsed.values["season"])
+	return season
 }
 
 func firstPositional(values []string) string {

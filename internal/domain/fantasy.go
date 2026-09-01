@@ -60,6 +60,8 @@ type League struct {
 	LeagueKey          string      `json:"league_key"`
 	Name               string      `json:"name"`
 	Season             int         `json:"season"`
+	EndDate            string      `json:"end_date"`
+	IsFinished         bool        `json:"is_finished"`
 	NumTeams           int         `json:"num_teams"`
 	ScoringType        ScoringType `json:"scoring_type"`
 	RosterPositions    []Position  `json:"roster_positions"`

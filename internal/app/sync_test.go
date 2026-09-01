@@ -162,6 +162,116 @@ func TestSyncCompleteDegradedAndDurableSelectionWorkflow(t *testing.T) {
 	}
 }
 
+type countingYahooFixture struct {
+	syncYahooFixture
+	settingsCalls *int
+}
+
+func (fixture countingYahooFixture) LeagueSettings(league string) (providers.LeagueSettings, error) {
+	*fixture.settingsCalls++
+	return fixture.syncYahooFixture.LeagueSettings(league)
+}
+
+func TestAutomaticOriginSyncSkipsFreshItemsWhileManualStillForces(t *testing.T) {
+	root := t.TempDir()
+	database, err := store.OpenAt(filepath.Join(root, "skout.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	for _, item := range [][3]string{{"yahoo_public", "fantasy", "mlb.l.1"}, {"good", "rows", "2026"}} {
+		if err := database.MarkSyncItemSuccess(item[0], item[1], item[2], syncPipelineVersion); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settingsCalls, stepCalls := 0, 0
+	newService := func(origin store.SyncOrigin) SyncService {
+		return SyncService{
+			Store: database, Yahoo: countingYahooFixture{settingsCalls: &settingsCalls}, ConfigPath: filepath.Join(root, "config.json"),
+			RuntimeDirectory: filepath.Join(root, "runtime"), Output: io.Discard,
+			Input: strings.NewReader(""), Prompt: io.Discard, Origin: origin,
+			CanonicalLeague: func(string) (string, error) { return "mlb.l.1", nil },
+			Steps: []SyncStep{{Source: "good", Item: "rows", Scope: "2026", Run: func(*store.Store) (SyncStepResult, error) {
+				stepCalls++
+				return SyncStepResult{Count: 1}, nil
+			}}},
+		}
+	}
+	automatic := newService(store.OriginAutomatic)
+	if _, err := automatic.Run("1", "operators"); err != nil || settingsCalls != 0 || stepCalls != 0 {
+		t.Fatalf("automatic sync fetched fresh items: settings=%d steps=%d err=%v", settingsCalls, stepCalls, err)
+	}
+	manual := newService(store.OriginManual)
+	if _, err := manual.Run("1", "operators"); err != nil || settingsCalls != 1 || stepCalls != 1 {
+		t.Fatalf("manual sync did not force: settings=%d steps=%d err=%v", settingsCalls, stepCalls, err)
+	}
+}
+
+type finishedYahooFixture struct {
+	syncYahooFixture
+	endDate    string
+	isFinished bool
+}
+
+func (fixture finishedYahooFixture) LeagueSettings(league string) (providers.LeagueSettings, error) {
+	settings, err := fixture.syncYahooFixture.LeagueSettings(league)
+	settings.League.EndDate = fixture.endDate
+	settings.League.IsFinished = fixture.isFinished
+	return settings, err
+}
+
+func TestSyncArchivesTheLeagueAfterItsFinalSeasonEndSnapshotAndThenSkipsIt(t *testing.T) {
+	root := t.TempDir()
+	database, err := store.OpenAt(filepath.Join(root, "skout.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	configPath := filepath.Join(root, "config.json")
+	afterEnd := func() time.Time { return time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC) }
+	newService := func(output io.Writer) SyncService {
+		return SyncService{
+			Store: database, Yahoo: finishedYahooFixture{endDate: "2026-09-20"}, ConfigPath: configPath,
+			RuntimeDirectory: filepath.Join(root, "runtime"), Output: output,
+			Input: strings.NewReader(""), Prompt: io.Discard, Origin: store.OriginManual,
+			CanonicalLeague: func(string) (string, error) { return "mlb.l.1", nil },
+			Now:             afterEnd,
+		}
+	}
+	var first bytes.Buffer
+	early := newService(&first)
+	early.Now = func() time.Time { return time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC) }
+	if _, err := early.Run("1", "operators"); err != nil {
+		t.Fatal(err)
+	}
+	if archived, err := database.LeagueArchived("mlb.l.1"); err != nil || archived {
+		t.Fatalf("league archived on its end date: archived=%v err=%v", archived, err)
+	}
+	var final bytes.Buffer
+	ended := newService(&final)
+	if _, err := ended.Run("1", "operators"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(final.String(), "league archived") {
+		t.Fatalf("final sync output=%q", final.String())
+	}
+	if archived, err := database.LeagueArchived("mlb.l.1"); err != nil || !archived {
+		t.Fatalf("archived=%v err=%v", archived, err)
+	}
+	if teams, err := database.FantasyTeams("mlb.l.1"); err != nil || len(teams) != 2 {
+		t.Fatalf("final snapshot teams=%#v err=%v", teams, err)
+	}
+	var skipped bytes.Buffer
+	again := newService(&skipped)
+	summary, err := again.Run("1", "operators")
+	if err != nil || !strings.Contains(skipped.String(), "archived") || !strings.Contains(skipped.String(), "frozen") {
+		t.Fatalf("summary=%q output=%q err=%v", summary, skipped.String(), err)
+	}
+	if !strings.Contains(summary, "1 steps succeeded, 0 failed") {
+		t.Fatalf("skip summary=%q", summary)
+	}
+}
+
 func TestSyncYahooFailureRetainsPriorSnapshotAndConfiguration(t *testing.T) {
 	root := t.TempDir()
 	database, err := store.OpenAt(filepath.Join(root, "skout.db"))
@@ -602,7 +712,7 @@ func TestProductDocumentationMatchesTheExecutablePublicSurface(t *testing.T) {
 	}
 
 	architecture := read("arch.md")
-	for _, evidence := range []string{"public endpoints only", "schema version 6", "Credentials", "roster mutation", "background", "fantasy matchup", "database-operation lock", "skout.db-wal", "Every advertised command now has an executable Go path", "at most four requests in flight", "serialized collector", "already archived", "not a runtime or release dependency"} {
+	for _, evidence := range []string{"public endpoints only", "schema version 7", "Credentials", "roster mutation", "background", "fantasy matchup", "database-operation lock", "skout.db-wal", "Every advertised command now has an executable Go path", "at most four requests in flight", "serialized collector", "already archived", "not a runtime or release dependency", "archives the league"} {
 		if !strings.Contains(architecture, evidence) {
 			t.Fatalf("architecture lacks boundary evidence %q", evidence)
 		}

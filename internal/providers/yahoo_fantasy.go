@@ -378,7 +378,7 @@ func ParseLeagueSettings(leagueKey string, payload []byte) (LeagueSettings, erro
 	if len(categories) == 0 || len(positions) == 0 {
 		return LeagueSettings{}, yahooFantasyError(YahooIncompleteError, "scoring categories or roster positions are missing")
 	}
-	league := domain.League{LeagueKey: leagueKey, Name: name, Season: season, NumTeams: numTeams, ScoringType: domain.ParseScoringType(yahooText(metadata, "scoring_type"))}
+	league := domain.League{LeagueKey: leagueKey, Name: name, Season: season, EndDate: yahooText(metadata, "end_date"), IsFinished: yahooInt(metadata, "is_finished") == 1, NumTeams: numTeams, ScoringType: domain.ParseScoringType(yahooText(metadata, "scoring_type"))}
 	for _, position := range positions {
 		league.RosterPositions = append(league.RosterPositions, position.Position)
 	}
