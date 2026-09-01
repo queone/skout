@@ -412,7 +412,7 @@ func hittingSyncWrites(rows []providers.BulkHittingSplit) []store.SeasonStatWrit
 	writes := make([]store.SeasonStatWrite, 0, len(rows))
 	for _, row := range rows {
 		stat := row.Stat
-		writes = append(writes, store.SeasonStatWrite{MLBAMID: row.Player.PersonID, Name: row.Player.FullName, TeamAbbreviation: mlbTeamAbbreviation(row.Team.TeamID), StatGroup: "hitting", Games: stat.GamesPlayed, PlateAppearances: stat.PlateAppearances, AtBats: stat.AtBats, Hits: stat.Hits, HomeRuns: stat.HomeRuns, RunsBattedIn: stat.RBI, Runs: stat.Runs, StolenBases: stat.StolenBases, Walks: stat.Walks, HitByPitch: stat.HitByPitch, TotalBases: stat.TotalBases, Strikeouts: stat.Strikeouts})
+		writes = append(writes, store.SeasonStatWrite{MLBAMID: row.Player.PersonID, Name: row.Player.FullName, TeamAbbreviation: MLBTeamAbbreviation(row.Team.TeamID), StatGroup: "hitting", Games: stat.GamesPlayed, PlateAppearances: stat.PlateAppearances, AtBats: stat.AtBats, Hits: stat.Hits, HomeRuns: stat.HomeRuns, RunsBattedIn: stat.RBI, Runs: stat.Runs, StolenBases: stat.StolenBases, Walks: stat.Walks, HitByPitch: stat.HitByPitch, TotalBases: stat.TotalBases, Strikeouts: stat.Strikeouts})
 	}
 	return writes
 }
@@ -425,7 +425,7 @@ func pitchingSyncWrites(rows []providers.BulkPitchingSplit, qualityStarts map[in
 		if value, ok := qualityStarts[row.Player.PersonID]; ok {
 			quality = value
 		}
-		writes = append(writes, store.SeasonStatWrite{MLBAMID: row.Player.PersonID, Name: row.Player.FullName, TeamAbbreviation: mlbTeamAbbreviation(row.Team.TeamID), StatGroup: "pitching", Games: stat.GamesPitched, Wins: stat.Wins, Saves: stat.Saves, Holds: stat.Holds, Strikeouts: stat.Strikeouts, InningsOuts: inningsOuts(stat.InningsPitched), GamesStarted: stat.GamesStarted, QualityStarts: quality, HitsAllowed: stat.HitsAllowed, EarnedRuns: stat.EarnedRuns, PitcherWalks: stat.Walks})
+		writes = append(writes, store.SeasonStatWrite{MLBAMID: row.Player.PersonID, Name: row.Player.FullName, TeamAbbreviation: MLBTeamAbbreviation(row.Team.TeamID), StatGroup: "pitching", Games: stat.GamesPitched, Wins: stat.Wins, Saves: stat.Saves, Holds: stat.Holds, Strikeouts: stat.Strikeouts, InningsOuts: inningsOuts(stat.InningsPitched), GamesStarted: stat.GamesStarted, QualityStarts: quality, HitsAllowed: stat.HitsAllowed, EarnedRuns: stat.EarnedRuns, PitcherWalks: stat.Walks})
 	}
 	return writes
 }
@@ -433,7 +433,7 @@ func pitchingSyncWrites(rows []providers.BulkPitchingSplit, qualityStarts map[in
 func hittingIdentityCandidates(rows []providers.BulkHittingSplit) []store.IdentityCandidate {
 	candidates := make([]store.IdentityCandidate, 0, len(rows))
 	for _, row := range rows {
-		candidates = append(candidates, store.IdentityCandidate{MLBAMID: row.Player.PersonID, Name: row.Player.FullName, Team: mlbTeamAbbreviation(row.Team.TeamID), Role: "B"})
+		candidates = append(candidates, store.IdentityCandidate{MLBAMID: row.Player.PersonID, Name: row.Player.FullName, Team: MLBTeamAbbreviation(row.Team.TeamID), Role: "B"})
 	}
 	return candidates
 }
@@ -441,11 +441,7 @@ func hittingIdentityCandidates(rows []providers.BulkHittingSplit) []store.Identi
 func pitchingIdentityCandidates(rows []providers.BulkPitchingSplit) []store.IdentityCandidate {
 	candidates := make([]store.IdentityCandidate, 0, len(rows))
 	for _, row := range rows {
-		candidates = append(candidates, store.IdentityCandidate{MLBAMID: row.Player.PersonID, Name: row.Player.FullName, Team: mlbTeamAbbreviation(row.Team.TeamID), Role: "P"})
+		candidates = append(candidates, store.IdentityCandidate{MLBAMID: row.Player.PersonID, Name: row.Player.FullName, Team: MLBTeamAbbreviation(row.Team.TeamID), Role: "P"})
 	}
 	return candidates
-}
-
-func mlbTeamAbbreviation(teamID int64) string {
-	return map[int64]string{108: "LAA", 109: "ARI", 110: "BAL", 111: "BOS", 112: "CHC", 113: "CIN", 114: "CLE", 115: "COL", 116: "DET", 117: "HOU", 118: "KC", 119: "LAD", 120: "WSH", 121: "NYM", 133: "OAK", 134: "PIT", 135: "SD", 136: "SEA", 137: "SF", 138: "STL", 139: "TB", 140: "TEX", 141: "TOR", 142: "MIN", 143: "PHI", 144: "ATL", 145: "CWS", 146: "MIA", 147: "NYY", 158: "MIL"}[teamID]
 }

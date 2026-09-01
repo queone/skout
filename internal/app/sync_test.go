@@ -599,6 +599,21 @@ func TestPitchingSyncWritesMergeOnlySuccessfulQualityStartCounts(t *testing.T) {
 	}
 }
 
+func TestIdentityCandidatesAndSeasonStatWritesUseCurrentMLBTeamCodes(t *testing.T) {
+	hitters := []providers.BulkHittingSplit{{Player: providers.BulkPlayer{PersonID: 672515, FullName: "Gabriel Moreno"}, Team: providers.BulkTeam{TeamID: 109}}}
+	pitchers := []providers.BulkPitchingSplit{{Player: providers.BulkPlayer{PersonID: 2, FullName: "Athletics Arm"}, Team: providers.BulkTeam{TeamID: 133}}}
+	hitting, pitching := hittingIdentityCandidates(hitters), pitchingIdentityCandidates(pitchers)
+	if hitting[0].Team != "AZ" || hitting[0].Role != "B" || pitching[0].Team != "ATH" || pitching[0].Role != "P" {
+		t.Fatalf("hitting=%#v pitching=%#v", hitting, pitching)
+	}
+	if writes := hittingSyncWrites(hitters); writes[0].TeamAbbreviation != "AZ" {
+		t.Fatalf("hitting writes=%#v", writes)
+	}
+	if writes := pitchingSyncWrites(pitchers, nil); writes[0].TeamAbbreviation != "ATH" {
+		t.Fatalf("pitching writes=%#v", writes)
+	}
+}
+
 func TestMLBRosterStepIsolatesTeamsRetainsFailuresAndRespectsRowFreshness(t *testing.T) {
 	database, err := store.OpenAt(filepath.Join(t.TempDir(), "rosters.db"))
 	if err != nil {
