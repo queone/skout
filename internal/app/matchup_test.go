@@ -211,11 +211,11 @@ func TestMatchupFreshnessBoundaryAndLocalFallback(t *testing.T) {
 		calls++
 		return providers.RedzoneFeed{}, errors.New("offline")
 	}
-	service.Now = func() time.Time { return now.Add(60 * time.Second) }
+	service.Now = func() time.Time { return now.Add(liveReuseWindow) }
 	if _, err := service.Matchup(MatchupOptions{}); err != nil || calls != 0 {
 		t.Fatalf("boundary calls=%d err=%v", calls, err)
 	}
-	service.Now = func() time.Time { return now.Add(61 * time.Second) }
+	service.Now = func() time.Time { return now.Add(liveReuseWindow + time.Second) }
 	output, err := service.Matchup(MatchupOptions{})
 	if err != nil || calls != 1 || !strings.Contains(output, "STALE") {
 		t.Fatalf("stale calls=%d output=%q err=%v", calls, output, err)
@@ -229,6 +229,36 @@ func TestMatchupFreshnessBoundaryAndLocalFallback(t *testing.T) {
 	output, err = local.Matchup(MatchupOptions{})
 	if err != nil || !strings.Contains(output, "YAHOO UNAVAILABLE") || strings.Contains(output, "SUMMARY") || !strings.Contains(output, "Operators") {
 		t.Fatalf("local output=%q err=%v", output, err)
+	}
+}
+
+func TestMatchupReusesViewOddsAndDailyOverlayWithinTheWindow(t *testing.T) {
+	current := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	database := fantasyAppStoreWithClock(t, adjustableClock{&current})
+	feed := matchupFeed()
+	redzone, odds, hitting, pitching := 0, 0, 0, 0
+	service := &MatchupService{
+		Store: database, League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", Season: 2026,
+		Now: func() time.Time { return current }, Mode: terminal.Plain,
+		FetchRedzone: func(string, string) (providers.RedzoneFeed, error) { redzone++; return feed, nil },
+		HittingRange: func(int64, string, string) ([]providers.BulkHittingSplit, error) { hitting++; return nil, nil },
+		PitchingRange: func(int64, string, string) ([]providers.BulkPitchingSplit, error) {
+			pitching++
+			return nil, nil
+		},
+		Schedule: func(string) ([]providers.ScheduleGame, error) { return nil, nil },
+		Odds:     func(time.Time) (providers.ESPNSlateLines, error) { odds++; return providers.ESPNSlateLines{}, nil },
+	}
+	defer service.Close()
+	if _, err := service.Matchup(MatchupOptions{}); err != nil || redzone != 1 || odds != 1 || hitting != 1 || pitching != 1 {
+		t.Fatalf("first render redzone=%d odds=%d hitting=%d pitching=%d err=%v", redzone, odds, hitting, pitching, err)
+	}
+	if _, err := service.Matchup(MatchupOptions{}); err != nil || redzone != 1 || odds != 1 || hitting != 1 || pitching != 1 {
+		t.Fatalf("reused render redzone=%d odds=%d hitting=%d pitching=%d err=%v", redzone, odds, hitting, pitching, err)
+	}
+	current = current.Add(liveReuseWindow + time.Minute)
+	if _, err := service.Matchup(MatchupOptions{}); err != nil || redzone != 2 || odds != 2 || hitting != 2 || pitching != 2 {
+		t.Fatalf("lapsed render redzone=%d odds=%d hitting=%d pitching=%d err=%v", redzone, odds, hitting, pitching, err)
 	}
 }
 

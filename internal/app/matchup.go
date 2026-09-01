@@ -21,7 +21,10 @@ import (
 	"github.com/queone/skout/internal/transport"
 )
 
-const matchupFreshness = 60 * time.Second
+// liveReuseWindow bounds how long live command context — the Yahoo matchup
+// view, weekly scoreboard, roster slots, ESPN odds, daily MLB overlay, and
+// player game logs — is reused before refetching.
+const liveReuseWindow = 5 * time.Minute
 
 type yahooMatchupError struct{ err error }
 
@@ -316,12 +319,39 @@ func (service *MatchupService) startPrefetch(period matchupPeriod) *matchupPrefe
 	}()
 	if service.Odds != nil {
 		prefetch.odds = make(chan matchupOddsResult, 1)
-		go func() {
-			lines, err := service.Odds(service.now())
-			prefetch.odds <- matchupOddsResult{lines: lines, err: err}
-		}()
+		if lines, ok := service.storedOddsWithinWindow(day); ok {
+			prefetch.odds <- matchupOddsResult{lines: lines}
+		} else {
+			go func() {
+				lines, err := service.Odds(service.now())
+				if err == nil {
+					service.saveOddsSnapshot(day, lines)
+				}
+				prefetch.odds <- matchupOddsResult{lines: lines, err: err}
+			}()
+		}
 	}
 	return prefetch
+}
+
+// storedOddsWithinWindow serves the day's odds snapshot while it is inside the
+// matchup reuse window.
+func (service *MatchupService) storedOddsWithinWindow(day string) (providers.ESPNSlateLines, bool) {
+	snapshot, err := service.Store.CommandSnapshot("match_odds", "espn", day)
+	if err != nil || snapshot == nil || snapshot.SnapshotVersion != "v1" || snapshot.Stale || service.now().Sub(snapshot.LastSuccessfulAt) > liveReuseWindow {
+		return providers.ESPNSlateLines{}, false
+	}
+	var lines providers.ESPNSlateLines
+	if json.Unmarshal([]byte(snapshot.Payload), &lines) != nil {
+		return providers.ESPNSlateLines{}, false
+	}
+	return lines, true
+}
+
+func (service *MatchupService) saveOddsSnapshot(day string, lines providers.ESPNSlateLines) {
+	if payload, err := json.Marshal(lines); err == nil {
+		_ = service.Store.SaveCommandSnapshot("match_odds", "espn", day, "v1", string(payload))
+	}
 }
 
 func (service *MatchupService) acquire(period matchupPeriod, selected store.StoredFantasyTeam, storedTeams []store.StoredFantasyTeam, prefetch *matchupPrefetch) (domain.MatchupView, error) {
@@ -507,7 +537,7 @@ func (service *MatchupService) defaultSnapshots(period matchupPeriod, selected s
 		return domain.MatchupView{}, false
 	}
 	for _, snapshot := range rows {
-		if snapshot.Source != "yahoo" && snapshot.Source != "yahoo_public" || snapshot.SnapshotVersion != "v1" || freshOnly && service.now().Sub(snapshot.LastSuccessfulAt) > matchupFreshness {
+		if snapshot.Source != "yahoo" && snapshot.Source != "yahoo_public" || snapshot.SnapshotVersion != "v1" || freshOnly && service.now().Sub(snapshot.LastSuccessfulAt) > liveReuseWindow {
 			continue
 		}
 		var matchups []domain.Matchup
@@ -538,7 +568,7 @@ func (service *MatchupService) compatibleRoster(dataset, scope, team string, wee
 		return domain.RosterWeekStats{}, false
 	}
 	for _, snapshot := range rows {
-		if snapshot.Source != "yahoo" && snapshot.Source != "yahoo_public" || snapshot.SnapshotVersion != "v1" && snapshot.SnapshotVersion != "v2" || freshOnly && service.now().Sub(snapshot.LastSuccessfulAt) > matchupFreshness {
+		if snapshot.Source != "yahoo" && snapshot.Source != "yahoo_public" || snapshot.SnapshotVersion != "v1" && snapshot.SnapshotVersion != "v2" || freshOnly && service.now().Sub(snapshot.LastSuccessfulAt) > liveReuseWindow {
 			continue
 		}
 		var row domain.RosterWeekStats
@@ -589,6 +619,32 @@ func (service *MatchupService) enrichView(view domain.MatchupView, period matchu
 	return view, nil
 }
 
+// dailyStatsPayload is the stored daily MLB overlay for one date.
+type dailyStatsPayload struct {
+	Hitting  []providers.BulkHittingSplit  `json:"hitting"`
+	Pitching []providers.BulkPitchingSplit `json:"pitching"`
+}
+
+// storedDailyStatsWithinWindow serves the day's overlay snapshot while it is
+// inside the matchup reuse window.
+func (service *MatchupService) storedDailyStatsWithinWindow(day string) ([]providers.BulkHittingSplit, []providers.BulkPitchingSplit, bool) {
+	snapshot, err := service.Store.CommandSnapshot("match_day_stats", "mlb", day)
+	if err != nil || snapshot == nil || snapshot.SnapshotVersion != "v1" || snapshot.Stale || service.now().Sub(snapshot.LastSuccessfulAt) > liveReuseWindow {
+		return nil, nil, false
+	}
+	var payload dailyStatsPayload
+	if json.Unmarshal([]byte(snapshot.Payload), &payload) != nil {
+		return nil, nil, false
+	}
+	return payload.Hitting, payload.Pitching, true
+}
+
+func (service *MatchupService) saveDailyStatsSnapshot(day string, hitters []providers.BulkHittingSplit, pitchers []providers.BulkPitchingSplit) {
+	if payload, err := json.Marshal(dailyStatsPayload{Hitting: hitters, Pitching: pitchers}); err == nil {
+		_ = service.Store.SaveCommandSnapshot("match_day_stats", "mlb", day, "v1", string(payload))
+	}
+}
+
 func (service *MatchupService) overlayDaily(view *domain.MatchupView, day string) error {
 	local, err := service.Store.FantasyPlayers(service.League)
 	if err != nil {
@@ -600,25 +656,27 @@ func (service *MatchupService) overlayDaily(view *domain.MatchupView, day string
 			return fmt.Errorf("match: daily MLB overlay requires a reconciled MLB identity for %s; run skout sync and retry", player.Name)
 		}
 	}
-	if service.HittingRange == nil || service.PitchingRange == nil {
-		return fmt.Errorf("match: daily MLB statistics providers are unavailable")
-	}
-	var hitters []providers.BulkHittingSplit
-	var pitchers []providers.BulkPitchingSplit
-	var hitterErr, pitcherErr error
-	var workers sync.WaitGroup
-	workers.Add(2)
-	go func() {
-		defer workers.Done()
-		hitters, hitterErr = service.HittingRange(int64(service.Season), day, day)
-	}()
-	go func() {
-		defer workers.Done()
-		pitchers, pitcherErr = service.PitchingRange(int64(service.Season), day, day)
-	}()
-	workers.Wait()
-	if hitterErr != nil || pitcherErr != nil {
-		return fmt.Errorf("match: acquire complete daily MLB statistics: %v", errorsJoin(hitterErr, pitcherErr))
+	hitters, pitchers, reused := service.storedDailyStatsWithinWindow(day)
+	if !reused {
+		if service.HittingRange == nil || service.PitchingRange == nil {
+			return fmt.Errorf("match: daily MLB statistics providers are unavailable")
+		}
+		var hitterErr, pitcherErr error
+		var workers sync.WaitGroup
+		workers.Add(2)
+		go func() {
+			defer workers.Done()
+			hitters, hitterErr = service.HittingRange(int64(service.Season), day, day)
+		}()
+		go func() {
+			defer workers.Done()
+			pitchers, pitcherErr = service.PitchingRange(int64(service.Season), day, day)
+		}()
+		workers.Wait()
+		if hitterErr != nil || pitcherErr != nil {
+			return fmt.Errorf("match: acquire complete daily MLB statistics: %v", errorsJoin(hitterErr, pitcherErr))
+		}
+		service.saveDailyStatsSnapshot(day, hitters, pitchers)
 	}
 	hitting := map[int64]providers.HittingStats{}
 	for _, row := range hitters {

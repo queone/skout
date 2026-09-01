@@ -183,6 +183,53 @@ func TestRosterOverlaysLiveSlotsAndKeepsStoredSlotsOnFailure(t *testing.T) {
 	}
 }
 
+func TestFantasyLiveReadsReuseSnapshotsWithinTheWindow(t *testing.T) {
+	current := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	database := fantasyAppStoreWithClock(t, adjustableClock{&current})
+	defer database.Close()
+	rosterFetches, scoreboardFetches, logFetches := 0, 0, 0
+	live := domain.RosterWeekStats{TeamKey: "mlb.l.1.t.1", Week: 7, Players: []domain.PlayerWeekStats{
+		{YahooPlayerID: 101, Name: "Ada Hitter", Team: "NYY", PositionType: "B", SlotPosition: domain.PositionBench},
+		{YahooPlayerID: 102, Name: "Ace Pitcher", Team: "BOS", PositionType: "P", SlotPosition: domain.PositionStartingPitcher},
+	}}
+	service := &FantasyService{Store: database, League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", Now: func() time.Time { return current }, Mode: terminal.Plain,
+		RosterWeek: func(string, int) (domain.RosterWeekStats, error) { rosterFetches++; return live, nil },
+		YahooScoreboard: func(league string, week *int) ([]domain.Matchup, error) {
+			scoreboardFetches++
+			return []domain.Matchup{{Week: *week, WeekStart: "2026-08-24", WeekEnd: "2026-08-30", Teams: [2]domain.MatchupTeam{{TeamKey: "mlb.l.1.t.1", Name: "Operators", Stats: map[string]string{"7": "5"}}, {TeamKey: "mlb.l.1.t.2", Name: "Rivals", Stats: map[string]string{"7": "3"}}}}}, nil
+		},
+		PitcherGameLog: func(int64, int64) ([]providers.PitchingGameLogEntry, error) {
+			logFetches++
+			return []providers.PitchingGameLogEntry{{Date: "2026-08-24", GameID: 9, IsHome: true, OpponentTeamID: 139, Stat: providers.PitchingStats{InningsPitched: "6.0", Wins: 1, Strikeouts: 7, ERA: "3.00", WHIP: "1.00"}}}, nil
+		},
+	}
+	for _, expected := range []int{1, 1} {
+		if _, err := service.Roster(""); err != nil || rosterFetches != expected {
+			t.Fatalf("roster fetches=%d want=%d err=%v", rosterFetches, expected, err)
+		}
+	}
+	for _, expected := range []int{1, 1} {
+		if _, err := service.Totals("true"); err != nil || scoreboardFetches != expected {
+			t.Fatalf("scoreboard fetches=%d want=%d err=%v", scoreboardFetches, expected, err)
+		}
+	}
+	for _, expected := range []int{1, 1} {
+		if _, err := service.Pool("P", PlayerPoolOptions{Argument: "ace"}); err != nil || logFetches != expected {
+			t.Fatalf("log fetches=%d want=%d err=%v", logFetches, expected, err)
+		}
+	}
+	current = current.Add(liveReuseWindow + time.Minute)
+	if _, err := service.Roster(""); err != nil || rosterFetches != 2 {
+		t.Fatalf("lapsed roster fetches=%d err=%v", rosterFetches, err)
+	}
+	if _, err := service.Totals("true"); err != nil || scoreboardFetches != 2 {
+		t.Fatalf("lapsed scoreboard fetches=%d err=%v", scoreboardFetches, err)
+	}
+	if _, err := service.Pool("P", PlayerPoolOptions{Argument: "ace"}); err != nil || logFetches != 2 {
+		t.Fatalf("lapsed log fetches=%d err=%v", logFetches, err)
+	}
+}
+
 func TestArchivedSeasonReadsServeLocalRowsAndLabelOutput(t *testing.T) {
 	now := time.Date(2027, 5, 1, 12, 0, 0, 0, time.UTC)
 	database := fantasyAppStore(t, now)
@@ -256,6 +303,7 @@ func TestFantasyDetailSnapshotsAndUsesOnlyItsStaleFallback(t *testing.T) {
 		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
 	}
 	service.HitterGameLog = func(int64, int64) ([]providers.HittingGameLogEntry, error) { return nil, errors.New("offline") }
+	service.Now = func() time.Time { return now.Add(liveReuseWindow + time.Minute) }
 	output, err = service.Pool("B", PlayerPoolOptions{Argument: "Ada Hitter"})
 	if err != nil || !strings.Contains(output, "GAME LOG data may be stale") {
 		t.Fatalf("stale output=%q err=%v", output, err)

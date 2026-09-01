@@ -366,6 +366,12 @@ func (service *FantasyService) gameLogs(player domain.StoredFantasyPlayer, seaso
 		return nil, false, fmt.Errorf("MLB identity is unavailable; run skout sync and retry")
 	}
 	scope := strconv.FormatInt(*player.MLBAMID, 10)
+	if snapshot, err := service.Store.CommandSnapshot("player-game-log", "mlb", scope); err == nil && snapshot != nil && snapshot.SnapshotVersion == "v1" && !snapshot.Stale && service.now().Sub(snapshot.LastSuccessfulAt) <= liveReuseWindow {
+		var stored []domain.PlayerGameLog
+		if json.Unmarshal([]byte(snapshot.Payload), &stored) == nil && validPlayerGameLogs(stored, player.Role) {
+			return stored, false, nil
+		}
+	}
 	logs := make([]domain.PlayerGameLog, 0)
 	var refreshErr error
 	if player.Role == "P" {
@@ -621,6 +627,16 @@ func (service *FantasyService) weeklyTotals(requested string) (string, error) {
 
 func (service *FantasyService) weeklyMatchup(week int) (domain.Matchup, bool, error) {
 	scope := fmt.Sprintf("%s:%d", service.League, week)
+	if snapshot, err := service.Store.CommandSnapshot("match_scoreboard", "yahoo", scope); err == nil && snapshot != nil && snapshot.SnapshotVersion == "v1" && !snapshot.Stale && service.now().Sub(snapshot.LastSuccessfulAt) <= liveReuseWindow {
+		var stored []domain.Matchup
+		if json.Unmarshal([]byte(snapshot.Payload), &stored) == nil && validMatchupRows(stored) {
+			for _, row := range stored {
+				if row.Week == week && matchupHasTeam(row, service.TeamKey) {
+					return row, false, nil
+				}
+			}
+		}
+	}
 	var rows []domain.Matchup
 	if service.YahooScoreboard != nil {
 		rows, _ = service.YahooScoreboard(service.League, &week)
@@ -799,15 +815,19 @@ func (service *FantasyService) overlayLiveSlots(teamKey string, players []domain
 		return
 	}
 	scope := fmt.Sprintf("%s:%d", teamKey, *week)
-	live, err := service.RosterWeek(teamKey, *week)
-	if err == nil && validRoster(live, teamKey, *week) {
-		if payload, encodeErr := json.Marshal(live); encodeErr == nil {
-			_ = service.Store.SaveCommandSnapshot("match_roster", "yahoo", scope, "v2", string(payload))
-		}
-	} else {
-		snapshot, readErr := service.Store.CommandSnapshot("match_roster", "yahoo", scope)
-		if readErr != nil || snapshot == nil || snapshot.SnapshotVersion != "v2" || json.Unmarshal([]byte(snapshot.Payload), &live) != nil || !validRoster(live, teamKey, *week) {
-			return
+	live, reused := service.storedRosterWithinWindow(scope, teamKey, *week)
+	if !reused {
+		fetched, err := service.RosterWeek(teamKey, *week)
+		if err == nil && validRoster(fetched, teamKey, *week) {
+			live = fetched
+			if payload, encodeErr := json.Marshal(live); encodeErr == nil {
+				_ = service.Store.SaveCommandSnapshot("match_roster", "yahoo", scope, "v2", string(payload))
+			}
+		} else {
+			snapshot, readErr := service.Store.CommandSnapshot("match_roster", "yahoo", scope)
+			if readErr != nil || snapshot == nil || snapshot.SnapshotVersion != "v2" || json.Unmarshal([]byte(snapshot.Payload), &live) != nil || !validRoster(live, teamKey, *week) {
+				return
+			}
 		}
 	}
 	slots := make(map[int64]string, len(live.Players))
@@ -824,6 +844,20 @@ func (service *FantasyService) overlayLiveSlots(teamKey string, players []domain
 			player.Slot = &value
 		}
 	}
+}
+
+// storedRosterWithinWindow serves the stored weekly roster while it is inside
+// the live reuse window.
+func (service *FantasyService) storedRosterWithinWindow(scope, teamKey string, week int) (domain.RosterWeekStats, bool) {
+	snapshot, err := service.Store.CommandSnapshot("match_roster", "yahoo", scope)
+	if err != nil || snapshot == nil || snapshot.SnapshotVersion != "v2" || snapshot.Stale || service.now().Sub(snapshot.LastSuccessfulAt) > liveReuseWindow {
+		return domain.RosterWeekStats{}, false
+	}
+	var live domain.RosterWeekStats
+	if json.Unmarshal([]byte(snapshot.Payload), &live) != nil || !validRoster(live, teamKey, week) {
+		return domain.RosterWeekStats{}, false
+	}
+	return live, true
 }
 
 // fantasyPlayers reads league players, pinning stats to the archived season when one is selected.

@@ -81,7 +81,7 @@ skout --help               # show command help
 skout --version            # show the binary version
 ```
 
-Fantasy commands (`m`, `r`, `rt`, `h`, `p`) check when the last successful Yahoo sync ran; when it is missing or older than 6 hours, they run a blocking sync with progress output before rendering; that sync refreshes only providers whose own freshness windows have lapsed. If that sync fails, the command serves the last successful data with a staleness notice; MLB commands keep their own per-dataset refresh windows.
+Fantasy commands (`m`, `r`, `rt`, `h`, `p`) check when the last successful Yahoo sync ran; when it is missing or older than 6 hours, they run a blocking sync with progress output before rendering; that sync refreshes only providers whose own freshness windows have lapsed. Fantasy commands additionally reuse their live context — the Yahoo matchup view, weekly scoreboard, roster slots, odds, daily stat overlay, and player game logs — for five minutes, so repeat runs inside that window render instantly. If that sync fails, the command serves the last successful data with a staleness notice; MLB commands keep their own per-dataset refresh windows.
 
 When the Yahoo league reports its season has ended, the next `skout sync` captures the final snapshot and archives that league locally; later syncs skip it and never overwrite its data. The `-S`/`--season` flag on `m`, `r`, `rt`, `h`, and `p` reads an archived season entirely from the local database, with no provider requests, and labels the output as archived.
 
