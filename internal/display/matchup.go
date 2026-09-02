@@ -11,24 +11,20 @@ import (
 	"github.com/queone/skout/internal/terminal"
 )
 
-// RenderMatchup renders two fantasy rosters and their category totals side by side.
+// RenderMatchup renders the pairing's scoreboard, its odds lines, and both
+// rosters side by side.
 func RenderMatchup(view domain.MatchupView, mode terminal.ColorMode) string {
-	mine, opponent := &view.Matchup.Teams[0], &view.Matchup.Teams[1]
-	if view.Matchup.Teams[1].TeamKey == view.Mine.TeamKey {
-		mine, opponent = opponent, mine
-	}
 	var output strings.Builder
-	fmt.Fprintf(&output, "%s %s\n", terminal.TableHeading("MATCHUP WEEK:", mode), terminal.Dim(fmt.Sprintf("%d of 26 (%s / %s)", view.Matchup.Week, matchupDate(view.Matchup.WeekStart), matchupDate(view.Matchup.WeekEnd)), mode))
+	detail := fmt.Sprintf("%d of 26 (%s / %s)", view.Matchup.Week, matchupDate(view.Matchup.WeekStart), matchupDate(view.Matchup.WeekEnd))
+	if view.Day != "" {
+		detail += "  ·  " + matchupDate(view.Day)
+	}
+	fmt.Fprintf(&output, "%s %s\n", terminal.TableHeading("MATCHUP WEEK:", mode), terminal.Dim(detail, mode))
 	if view.Stale {
 		output.WriteString(terminal.Warning("STALE — Yahoo unavailable; showing the last complete matchup snapshot", mode) + "\n")
 	}
-	fmt.Fprintf(&output, "%s           %s\n", matchupTeamDivider(*mine, view.Teams, mode), strings.TrimRight(matchupTeamDivider(*opponent, view.Teams, mode), " "))
-	renderMatchupPlayers(&output, view.Mine.Players, view.Opponent.Players, "B", *mine, *opponent, mode)
 	output.WriteByte('\n')
-	renderMatchupPlayers(&output, view.Mine.Players, view.Opponent.Players, "P", *mine, *opponent, mode)
-	output.WriteByte('\n')
-	output.WriteString(terminal.TableHeading("SUMMARY", mode) + "\n")
-	fmt.Fprintf(&output, "%s %s / %s / %s\n", terminal.TableHeading(fmt.Sprintf("%-12s", "W/T/L"), mode), terminal.Good(strconv.Itoa(mine.Wins), mode), terminal.Warning(strconv.Itoa(mine.Ties), mode), terminal.Injury(strconv.Itoa(mine.Losses), mode))
+	output.WriteString(leagueMatchupTable([]domain.Matchup{view.Matchup}, view.Teams, view.Mine.TeamKey, mode))
 	for _, mineSide := range []bool{true, false} {
 		label, emitted := "MY ODDS", false
 		if !mineSide {
@@ -39,13 +35,17 @@ func RenderMatchup(view domain.MatchupView, mode terminal.ColorMode) string {
 				continue
 			}
 			if emitted {
-				fmt.Fprintf(&output, "%12s %s\n", "", odds.Line)
+				fmt.Fprintf(&output, "%10s%s\n", "", odds.Line)
 			} else {
-				fmt.Fprintf(&output, "%s %s\n", terminal.TableHeading(fmt.Sprintf("%-12s", label), mode), odds.Line)
+				fmt.Fprintf(&output, "%s  %s\n", terminal.TableHeading(fmt.Sprintf("%-8s", label), mode), odds.Line)
 				emitted = true
 			}
 		}
 	}
+	output.WriteByte('\n')
+	renderMatchupPlayers(&output, view.Mine.Players, view.Opponent.Players, "B", mode)
+	output.WriteByte('\n')
+	renderMatchupPlayers(&output, view.Mine.Players, view.Opponent.Players, "P", mode)
 	return output.String()
 }
 
@@ -54,28 +54,7 @@ func RenderLocalMatchup(view domain.LocalMatchupView, mode terminal.ColorMode) s
 	return terminal.Warning("YAHOO UNAVAILABLE — showing local roster; matchup totals and opponent unavailable", mode) + "\n" + RenderFantasyPlayers(domain.CleanFantasyTeamName(view.TeamName), view.Players, mode)
 }
 
-func matchupTeamDivider(matchup domain.MatchupTeam, teams []domain.FantasyTeam, mode terminal.ColorMode) string {
-	wins, losses, ties, rank := int64(matchup.Wins), int64(matchup.Losses), int64(matchup.Ties), int64(0)
-	for _, team := range teams {
-		if team.TeamKey == matchup.TeamKey {
-			wins, losses, ties, rank = team.Wins, team.Losses, team.Ties, team.Rank
-			break
-		}
-	}
-	rankText := "—"
-	if rank > 0 {
-		rankText = ordinal(rank)
-	}
-	played := matchup.CompletedGames + matchup.LiveGames
-	total := played + matchup.RemainingGames
-	value := fmt.Sprintf("%s %s", terminal.Good(domain.CleanFantasyTeamName(matchup.Name), mode), terminal.Dim(fmt.Sprintf("(%d-%d-%d | %s) - %d rem (%d/%d)", wins, losses, ties, rankText, matchup.RemainingGames, played, total), mode))
-	if width := terminal.VisibleWidth(value); width < 67 {
-		value += strings.Repeat(" ", 67-width)
-	}
-	return value
-}
-
-func renderMatchupPlayers(output *strings.Builder, leftInput, rightInput []domain.PlayerWeekStats, role string, mine, opponent domain.MatchupTeam, mode terminal.ColorMode) {
+func renderMatchupPlayers(output *strings.Builder, leftInput, rightInput []domain.PlayerWeekStats, role string, mode terminal.ColorMode) {
 	var left, right []domain.PlayerWeekStats
 	for _, player := range leftInput {
 		if player.PositionType == role {
@@ -104,7 +83,6 @@ func renderMatchupPlayers(output *strings.Builder, leftInput, rightInput []domai
 		}
 		fmt.Fprintf(output, "%s    %s   %s\n", leftCell, terminal.Dim(fmt.Sprintf("%-4s", slot), mode), rightCell)
 	}
-	fmt.Fprintf(output, "%s           %s\n", matchupTotals(role, mine, opponent, mode), matchupTotals(role, opponent, mine, mode))
 }
 
 func matchupPlayerCell(player domain.PlayerWeekStats, role string, mode terminal.ColorMode) string {
@@ -194,19 +172,6 @@ func matchupCategoryCell(team, other domain.MatchupTeam, category matchupCategor
 	return terminal.Injury(padded, mode)
 }
 
-func matchupTotals(role string, team, other domain.MatchupTeam, mode terminal.ColorMode) string {
-	var value strings.Builder
-	value.WriteString(strings.Repeat(" ", 37))
-	for index, category := range matchupCategories(role) {
-		if index == 0 {
-			value.WriteString(terminal.Dim(fmt.Sprintf("%*s", category.width, matchupStat(team, category.label, category.id)), mode))
-			continue
-		}
-		value.WriteString(matchupCategoryCell(team, other, category, mode))
-	}
-	return value.String()
-}
-
 func matchupStat(team domain.MatchupTeam, name, id string) string {
 	if value := team.Stats[name]; value != "" {
 		return value
@@ -249,22 +214,31 @@ func RenderLeagueMatchups(view domain.LeagueMatchupsView, mode terminal.ColorMod
 	if view.Stale {
 		output.WriteString(terminal.Warning("STALE — Yahoo unavailable; showing the last complete scoreboard snapshot", mode) + "\n")
 	}
+	output.WriteByte('\n')
+	output.WriteString(leagueMatchupTable(view.Matchups, view.Teams, view.TeamKey, mode))
+	return output.String()
+}
+
+// leagueMatchupTable renders the shared scoreboard: one column header, then
+// each matchup as two stacked team rows, with the saved team's pairing first.
+func leagueMatchupTable(input []domain.Matchup, teams []domain.FantasyTeam, teamKey string, mode terminal.ColorMode) string {
 	width := 4
-	for _, matchup := range view.Matchups {
+	for _, matchup := range input {
 		for _, team := range matchup.Teams {
 			width = max(width, utf8.RuneCountInString(domain.CleanFantasyTeamName(team.Name)))
 		}
 	}
 	columns := leagueMatchupColumns()
 	var header strings.Builder
-	header.WriteString(fmt.Sprintf("%-*s  %4s  %-10s  %-6s", width, "TEAM", "RANK", "REC", "SCORE"))
+	fmt.Fprintf(&header, "%-*s  %4s  %-10s  %-6s", width, "TEAM", "RANK", "REC", "SCORE")
 	for _, column := range columns {
-		header.WriteString(fmt.Sprintf("%*s", column.width, column.label))
+		fmt.Fprintf(&header, "%*s", column.width, column.label)
 	}
-	output.WriteString("\n" + terminal.TableHeading(header.String(), mode) + "\n")
-	matchups := make([]domain.Matchup, 0, len(view.Matchups))
-	for _, matchup := range view.Matchups {
-		if matchup.Teams[0].TeamKey == view.TeamKey || matchup.Teams[1].TeamKey == view.TeamKey {
+	var output strings.Builder
+	output.WriteString(terminal.TableHeading(header.String(), mode) + "\n")
+	matchups := make([]domain.Matchup, 0, len(input))
+	for _, matchup := range input {
+		if matchup.Teams[0].TeamKey == teamKey || matchup.Teams[1].TeamKey == teamKey {
 			matchups = append([]domain.Matchup{matchup}, matchups...)
 			continue
 		}
@@ -275,7 +249,7 @@ func RenderLeagueMatchups(view domain.LeagueMatchupsView, mode terminal.ColorMod
 			output.WriteByte('\n')
 		}
 		for side, team := range matchup.Teams {
-			output.WriteString(leagueMatchupRow(team, matchup.Teams[1-side], view, width, columns, mode) + "\n")
+			output.WriteString(leagueMatchupRow(team, matchup.Teams[1-side], teams, teamKey, width, columns, mode) + "\n")
 		}
 	}
 	return output.String()
@@ -296,13 +270,13 @@ func leagueMatchupColumns() []matchupCategory {
 
 // leagueMatchupRow renders one team's line: name, dim rank and record, the
 // colored running score, and colored category cells against its opponent.
-func leagueMatchupRow(team, other domain.MatchupTeam, view domain.LeagueMatchupsView, width int, columns []matchupCategory, mode terminal.ColorMode) string {
+func leagueMatchupRow(team, other domain.MatchupTeam, teams []domain.FantasyTeam, teamKey string, width int, columns []matchupCategory, mode terminal.ColorMode) string {
 	name := fmt.Sprintf("%-*s", width, domain.CleanFantasyTeamName(team.Name))
-	if team.TeamKey == view.TeamKey {
+	if team.TeamKey == teamKey {
 		name = terminal.Good(name, mode)
 	}
 	rank, record := "—", "—"
-	for _, stored := range view.Teams {
+	for _, stored := range teams {
 		if stored.TeamKey != team.TeamKey {
 			continue
 		}

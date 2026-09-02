@@ -184,7 +184,7 @@ func TestArchivedSeasonMatchupServesStoredWeeklyPayloadsWithoutProviders(t *test
 	}
 	defer service.Close()
 	output, err := service.Matchup(MatchupOptions{})
-	if err != nil || !strings.Contains(output, "ARCHIVED — season 2026") || !strings.Contains(output, "MATCHUP WEEK:") {
+	if err != nil || !strings.Contains(output, "ARCHIVED — season 2026") || !strings.Contains(output, "MATCHUP WEEK:") || strings.Contains(output, "·") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
 	if _, err := service.Matchup(MatchupOptions{Day: "2026-08-25"}); err == nil || !strings.Contains(err.Error(), "archived season") {
@@ -261,7 +261,7 @@ func TestMatchupFreshnessBoundaryAndLocalFallback(t *testing.T) {
 		return providers.RedzoneFeed{}, errors.New("offline")
 	}
 	output, err = local.Matchup(MatchupOptions{})
-	if err != nil || !strings.Contains(output, "YAHOO UNAVAILABLE") || strings.Contains(output, "SUMMARY") || !strings.Contains(output, "Operators") {
+	if err != nil || !strings.Contains(output, "YAHOO UNAVAILABLE") || strings.Contains(output, "SCORE") || !strings.Contains(output, "Operators") {
 		t.Fatalf("local output=%q err=%v", output, err)
 	}
 }
@@ -515,5 +515,37 @@ func TestLeagueMatchupsEnforcesTheSixHourAutoSyncGate(t *testing.T) {
 	}
 	if _, err := service.LeagueMatchups(LeagueMatchupsOptions{}); err != nil || calls != 1 {
 		t.Fatalf("fresh sync state: calls=%d err=%v", calls, err)
+	}
+}
+
+func TestMatchupDayLabelFollowsTheDisplayedPeriod(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	service := matchupServiceForTest(t, now)
+	defer service.Close()
+	daily, err := service.Matchup(MatchupOptions{})
+	if err != nil || !strings.HasSuffix(strings.SplitN(daily, "\n", 2)[0], "  ·  Tue aug-25") {
+		t.Fatalf("daily=%q err=%v", daily, err)
+	}
+	feed := matchupFeed()
+	service.Scoreboard = func(_ string, week *int) ([]domain.Matchup, error) {
+		rows := make([]domain.Matchup, len(feed.Matchups))
+		copy(rows, feed.Matchups)
+		if week != nil && *week != 7 {
+			start := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -7*(7-*week))
+			for index := range rows {
+				rows[index].Week, rows[index].WeekStart, rows[index].WeekEnd = *week, start.Format("2006-01-02"), start.AddDate(0, 0, 6).Format("2006-01-02")
+			}
+		}
+		return rows, nil
+	}
+	selected, err := service.Matchup(MatchupOptions{Day: "Aug-24"})
+	if err != nil || !strings.HasSuffix(strings.SplitN(selected, "\n", 2)[0], "  ·  Mon aug-24") {
+		t.Fatalf("selected=%q err=%v", selected, err)
+	}
+	for name, options := range map[string]MatchupOptions{"weekly": {Weekly: true}, "week": {Week: 7}} {
+		output, err := service.Matchup(options)
+		if err != nil || strings.Contains(output, "·") {
+			t.Fatalf("%s output=%q err=%v", name, output, err)
+		}
 	}
 }

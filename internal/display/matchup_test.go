@@ -10,14 +10,14 @@ import (
 
 func sampleMatchupView() domain.MatchupView {
 	matchup := domain.Matchup{Week: 7, WeekStart: "2026-08-24", WeekEnd: "2026-08-30", Teams: [2]domain.MatchupTeam{{TeamKey: "t.1", Name: "💎 Operators", Stats: map[string]string{"7": "5", "3": ".300"}, Wins: 2, Ties: 1}, {TeamKey: "t.2", Name: "Rivals", Stats: map[string]string{"7": "3", "3": ".250"}, Losses: 2, Ties: 1}}}
-	return domain.MatchupView{Matchup: matchup, Mine: domain.RosterWeekStats{TeamKey: "t.1", TeamName: "Operators", Week: 7, Players: []domain.PlayerWeekStats{{YahooPlayerID: 1, Name: "Ada Hitter", Team: "NYY", PositionType: "B", SlotPosition: domain.PositionOutfield, HAB: "2/4", Runs: 1, BattingAverage: ".500"}}}, Opponent: domain.RosterWeekStats{TeamKey: "t.2", TeamName: "Rivals", Week: 7, Players: []domain.PlayerWeekStats{{YahooPlayerID: 2, Name: "Grace Hitter", Team: "BOS", PositionType: "B", SlotPosition: domain.PositionOutfield, HAB: "1/4", BattingAverage: ".250"}}}, Teams: []domain.FantasyTeam{{TeamKey: "t.1", Name: "Operators", Rank: 1, Wins: 4, Losses: 2}, {TeamKey: "t.2", Name: "Rivals", Rank: 2, Wins: 2, Losses: 4}}, Odds: []domain.MatchupOdds{{Mine: true, Line: "Ace v Rival  NYY@BOS  ██████░░░░ 60%"}}}
+	return domain.MatchupView{Matchup: matchup, Mine: domain.RosterWeekStats{TeamKey: "t.1", TeamName: "Operators", Week: 7, Players: []domain.PlayerWeekStats{{YahooPlayerID: 1, Name: "Ada Hitter", Team: "NYY", PositionType: "B", SlotPosition: domain.PositionOutfield, HAB: "2/4", Runs: 1, BattingAverage: ".500"}}}, Opponent: domain.RosterWeekStats{TeamKey: "t.2", TeamName: "Rivals", Week: 7, Players: []domain.PlayerWeekStats{{YahooPlayerID: 2, Name: "Grace Hitter", Team: "BOS", PositionType: "B", SlotPosition: domain.PositionOutfield, HAB: "1/4", BattingAverage: ".250"}}}, Teams: []domain.FantasyTeam{{TeamKey: "t.1", Name: "Operators", Rank: 1, Wins: 4, Losses: 2}, {TeamKey: "t.2", Name: "Rivals", Rank: 2, Wins: 2, Losses: 4}}, Day: "2026-08-24", Odds: []domain.MatchupOdds{{Mine: true, Line: "Ace v Rival  NYY@BOS  ██████░░░░ 60%"}}}
 }
 
 func TestMatchupGoldensStaleAndColorAlignment(t *testing.T) {
 	view := sampleMatchupView()
 	daily := RenderMatchup(view, terminal.Plain)
 	assertDisplayGolden(t, "testdata/fantasy/matchup-daily.txt", daily)
-	view.Stale = true
+	view.Stale, view.Day = true, ""
 	weekly := RenderMatchup(view, terminal.Plain)
 	assertDisplayGolden(t, "testdata/fantasy/matchup-weekly.txt", weekly)
 	local := RenderLocalMatchup(domain.LocalMatchupView{TeamName: "💎 Operators"}, terminal.Plain)
@@ -167,5 +167,30 @@ func TestLeagueMatchupsColorsWinnersLosersTiesAndScoresWithStableWidths(t *testi
 	}
 	if strings.Contains(operators, terminal.Good("   4", terminal.Color)) || strings.Contains(rivals, terminal.Injury("   4", terminal.Color)) {
 		t.Fatalf("tied category colored: operators=%q rivals=%q", operators, rivals)
+	}
+}
+
+func TestMatchupLeadsWithScoreboardOddsAndDayLabel(t *testing.T) {
+	view := sampleMatchupView()
+	lines := strings.Split(RenderMatchup(view, terminal.Plain), "\n")
+	if !strings.HasSuffix(lines[0], "  ·  Mon aug-24") || lines[1] != "" || !strings.HasPrefix(lines[2], "TEAM ") || !strings.HasPrefix(lines[3], "Operators ") || !strings.HasPrefix(lines[4], "Rivals ") || !strings.HasPrefix(lines[5], "MY ODDS   Ace v Rival") || lines[6] != "" || !strings.HasPrefix(lines[7], "HITTER ") {
+		t.Fatalf("daily=%q", lines)
+	}
+	daily := strings.Join(lines, "\n")
+	for _, removed := range []string{"SUMMARY", "W/T/L", "rem (", "—   5   —"} {
+		if strings.Contains(daily, removed) {
+			t.Fatalf("daily still contains %q: %q", removed, daily)
+		}
+	}
+	view.Day, view.Stale = "", true
+	weekly := strings.Split(RenderMatchup(view, terminal.Plain), "\n")
+	if strings.Contains(weekly[0], "·") || !strings.HasPrefix(weekly[1], "STALE") || weekly[2] != "" {
+		t.Fatalf("weekly=%q", weekly)
+	}
+	view.Stale = false
+	colored := strings.Split(RenderMatchup(view, terminal.Color), "\n")
+	league := strings.Split(RenderLeagueMatchups(domain.LeagueMatchupsView{Week: 7, WeekStart: view.Matchup.WeekStart, WeekEnd: view.Matchup.WeekEnd, Matchups: []domain.Matchup{view.Matchup}, Teams: view.Teams, TeamKey: "t.1"}, terminal.Color), "\n")
+	if colored[2] != league[2] || colored[3] != league[3] || colored[4] != league[4] {
+		t.Fatalf("scoreboard differs\nmatchup=%q\nleague=%q", colored[2:5], league[2:5])
 	}
 }

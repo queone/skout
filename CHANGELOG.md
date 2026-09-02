@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.12.0 | AC21 m view leads with the matchup scoreboard, rosters unchanged |
 | 0.11.0 | AC20 mm shows every league matchup for the week as category totals |
 | 0.10.0 | AC19 matchup keeps IL and NA labels with IL length, NA rows dark red |
 | 0.9.1 | AC18 fix fresh-database identity matching for AZ and ATH players |

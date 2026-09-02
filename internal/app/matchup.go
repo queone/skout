@@ -235,6 +235,9 @@ func (service *MatchupService) Matchup(options MatchupOptions) (string, error) {
 	view, err := service.acquire(period, selected, teams, service.startPrefetch(period))
 	var output string
 	if err == nil {
+		if period.daily {
+			view.Day = period.day
+		}
 		output = display.RenderMatchup(view, service.Mode)
 	} else {
 		if _, ok := errors.AsType[*yahooMatchupError](err); !ok {

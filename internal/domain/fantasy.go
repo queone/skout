@@ -195,6 +195,7 @@ type MatchupView struct {
 	Teams    []FantasyTeam
 	Stale    bool
 	Odds     []MatchupOdds
+	Day      string
 }
 
 // LocalMatchupView is the explicitly limited fallback when Yahoo is unavailable.
