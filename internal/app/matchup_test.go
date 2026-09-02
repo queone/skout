@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"strings"
 	"testing"
@@ -210,7 +211,7 @@ func TestMatchupValidationPrecedesProvidersAndNamedTeamPersistsOnlyOnSuccess(t *
 	if _, err := service.Matchup(MatchupOptions{Team: "nobody"}); err == nil || persisted != "" || providerCalls != 0 {
 		t.Fatalf("missing error=%v persisted=%q calls=%d", err, persisted, providerCalls)
 	}
-	if _, err := service.Matchup(MatchupOptions{Team: "Grace"}); err != nil || persisted != "mlb.l.1.t.2" || providerCalls != 1 {
+	if _, err := service.Matchup(MatchupOptions{Team: "Grace"}); err != nil || persisted != "mlb.l.1.t.2" || providerCalls != 2 {
 		t.Fatalf("selected error=%v persisted=%q calls=%d", err, persisted, providerCalls)
 	}
 }
@@ -547,5 +548,95 @@ func TestMatchupDayLabelFollowsTheDisplayedPeriod(t *testing.T) {
 		if err != nil || strings.Contains(output, "·") {
 			t.Fatalf("%s output=%q err=%v", name, output, err)
 		}
+	}
+}
+
+func scoreboardRowsWithRuns(feed providers.RedzoneFeed, mine, opponent string) []domain.Matchup {
+	rows := make([]domain.Matchup, len(feed.Matchups))
+	for index, row := range feed.Matchups {
+		for side := range row.Teams {
+			stats := map[string]string{}
+			maps.Copy(stats, row.Teams[side].Stats)
+			stats["7"] = mine
+			if side == 1 {
+				stats["7"] = opponent
+			}
+			row.Teams[side].Stats = stats
+		}
+		rows[index] = row
+	}
+	return rows
+}
+
+func TestDailyMatchupScoreboardRowComesFromTheWeeklyScoreboard(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	service := matchupServiceForTest(t, now)
+	defer service.Close()
+	feed := matchupFeed()
+	service.Scoreboard = func(string, *int) ([]domain.Matchup, error) { return scoreboardRowsWithRuns(feed, "9", "4"), nil }
+	output, err := service.Matchup(MatchupOptions{})
+	if err != nil || !strings.Contains(output, "1-0-0    9") || strings.Contains(output, "1-0-0    5") || strings.Contains(output, "STALE") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	current, err := service.Store.CommandSnapshot("match_scoreboard", "yahoo_public", "mlb.l.1:current")
+	if err != nil || current == nil || !strings.Contains(current.Payload, `"7":"5"`) {
+		t.Fatalf("current snapshot=%#v err=%v", current, err)
+	}
+	weekly, err := service.Store.CommandSnapshot("match_scoreboard", "yahoo", "mlb.l.1:7")
+	if err != nil || weekly == nil || !strings.Contains(weekly.Payload, `"7":"9"`) {
+		t.Fatalf("weekly snapshot=%#v err=%v", weekly, err)
+	}
+
+	failing := matchupServiceForTest(t, now)
+	defer failing.Close()
+	failing.Scoreboard = func(string, *int) ([]domain.Matchup, error) { return nil, errors.New("scoreboard down") }
+	output, err = failing.Matchup(MatchupOptions{})
+	if err != nil || !strings.Contains(output, "1-0-0    5") || strings.Contains(output, "STALE") {
+		t.Fatalf("fallback output=%q err=%v", output, err)
+	}
+}
+
+func TestDailyScoreboardOverlayReusesTheWeeklySnapshotAndFallsBackStale(t *testing.T) {
+	current := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	database := fantasyAppStoreWithClock(t, adjustableClock{&current})
+	feed := matchupFeed()
+	calls := 0
+	service := &MatchupService{
+		Store: database, League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", Season: 2026,
+		Now: func() time.Time { return current }, Mode: terminal.Plain,
+		FetchRedzone: func(string, string) (providers.RedzoneFeed, error) { return feed, nil },
+		Scoreboard: func(string, *int) ([]domain.Matchup, error) {
+			calls++
+			return scoreboardRowsWithRuns(feed, "9", "4"), nil
+		},
+		RosterWeek:    func(team string, _ int) (domain.RosterWeekStats, error) { return feed.RosterWeekStats[team], nil },
+		HittingRange:  func(int64, string, string) ([]providers.BulkHittingSplit, error) { return nil, nil },
+		PitchingRange: func(int64, string, string) ([]providers.BulkPitchingSplit, error) { return nil, nil },
+		Schedule:      func(string) ([]providers.ScheduleGame, error) { return nil, nil },
+	}
+	defer service.Close()
+	for _, run := range []struct {
+		name    string
+		options MatchupOptions
+		want    int
+	}{
+		{"daily", MatchupOptions{}, 1},
+		{"daily-reused", MatchupOptions{}, 1},
+		{"weekly-reused", MatchupOptions{Weekly: true}, 1},
+		{"current-week-reused", MatchupOptions{Week: 7}, 1},
+	} {
+		if output, err := service.Matchup(run.options); err != nil || calls != run.want || !strings.Contains(output, "1-0-0    9") {
+			t.Fatalf("%s calls=%d output=%q err=%v", run.name, calls, output, err)
+		}
+	}
+	current = current.Add(liveReuseWindow + time.Minute)
+	if output, err := service.Matchup(MatchupOptions{}); err != nil || calls != 2 || !strings.Contains(output, "1-0-0    9") {
+		t.Fatalf("lapsed calls=%d output=%q err=%v", calls, output, err)
+	}
+	current = current.Add(liveReuseWindow + time.Minute)
+	service.Scoreboard = func(string, *int) ([]domain.Matchup, error) { return nil, errors.New("scoreboard down") }
+	output, err := service.Matchup(MatchupOptions{})
+	if err != nil || !strings.Contains(output, "1-0-0    9") || !strings.Contains(output, "STALE") {
+		t.Fatalf("stale output=%q err=%v", output, err)
 	}
 }

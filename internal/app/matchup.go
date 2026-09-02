@@ -238,6 +238,9 @@ func (service *MatchupService) Matchup(options MatchupOptions) (string, error) {
 		if period.daily {
 			view.Day = period.day
 		}
+		if period.scope == "current" {
+			service.overlayScoreboardRow(&view, period.week, selected.TeamKey)
+		}
 		output = display.RenderMatchup(view, service.Mode)
 	} else {
 		if _, ok := errors.AsType[*yahooMatchupError](err); !ok {
@@ -386,7 +389,7 @@ func (service *MatchupService) acquire(period matchupPeriod, selected store.Stor
 		}
 		return service.enrichView(domain.MatchupView{Matchup: matchup, Mine: mine, Opponent: opponent, Teams: feed.Teams}, period, prefetch)
 	}
-	matchups, stale, err := service.scoreboard(period.week, period.preferSnapshot)
+	matchups, stale, err := service.weekScoreboard(period.week, period.preferSnapshot)
 	if err != nil {
 		return domain.MatchupView{}, err
 	}
@@ -1117,4 +1120,20 @@ func (service *MatchupService) weekScoreboard(week int, preferSnapshot bool) ([]
 		}
 	}
 	return service.scoreboard(week, preferSnapshot)
+}
+
+// overlayScoreboardRow replaces the daily view's pairing row with the weekly
+// scoreboard row so the daily, weekly, and league views agree.
+func (service *MatchupService) overlayScoreboardRow(view *domain.MatchupView, week int, teamKey string) {
+	rows, stale, err := service.weekScoreboard(week, false)
+	if err != nil {
+		return
+	}
+	for _, row := range rows {
+		if row.Week == week && matchupHasTeam(row, teamKey) {
+			view.Matchup = row
+			view.Stale = view.Stale || stale
+			return
+		}
+	}
 }

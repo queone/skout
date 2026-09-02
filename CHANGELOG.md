@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.13.0 | AC22 daily m scoreboard reads the Yahoo scoreboard so m, m -W, and mm agree |
 | 0.12.0 | AC21 m view leads with the matchup scoreboard, rosters unchanged |
 | 0.11.0 | AC20 mm shows every league matchup for the week as category totals |
 | 0.10.0 | AC19 matchup keeps IL and NA labels with IL length, NA rows dark red |
