@@ -12,7 +12,7 @@ skout reads a configured public Yahoo league, enriches its players with MLB and 
 
 Yahoo access is unauthenticated and public-only. skout does not require a developer application, OAuth token, browser login, cookie, or credential, and it never changes a Yahoo roster.
 
-The command views cover daily and weekly fantasy matchups, fantasy rosters and totals, hitter and pitcher pools and detail cards, local status, MLB 40-man rosters, standings and team totals, probable pitchers, provider diagnostics, and an embedded baseball glossary. For architecture and design details, see [arch.md](arch.md).
+The command views cover daily and weekly fantasy matchups, the week's league scoreboard, fantasy rosters and totals, hitter and pitcher pools and detail cards, local status, MLB 40-man rosters, standings and team totals, probable pitchers, provider diagnostics, and an embedded baseball glossary. For architecture and design details, see [arch.md](arch.md).
 
 ## Setup
 
@@ -56,6 +56,8 @@ skout m                    # today's matchup with live MLB context
 skout m -W                 # current weekly matchup totals
 skout m -w 7               # a selected Yahoo matchup week
 skout m -D Jul-01          # one day in the active fantasy season
+skout mm                   # every league matchup for the week
+skout mm -w 22             # every league matchup for a selected week
 skout r                    # the saved fantasy team's roster
 skout r toros              # another roster without changing the saved team
 skout rt                   # every fantasy team's season totals
@@ -72,6 +74,7 @@ skout h judge              # one hitter detail card and recent game log
 skout r -S 2026            # a past season's roster from the local archive
 skout rt --season 2026     # a past season's team totals
 skout m -S 2026 -w 7       # a stored matchup week from a past season
+skout mm -S 2026 -w 7      # a stored week's league matchups from a past season
 
 # Reference and diagnostics
 skout i                    # browse the embedded glossary
@@ -81,7 +84,7 @@ skout --help               # show command help
 skout --version            # show the binary version
 ```
 
-Fantasy commands (`m`, `r`, `rt`, `h`, `p`) check when the last successful Yahoo sync ran; when it is missing or older than 6 hours, they run a blocking sync with progress output before rendering; that sync refreshes only providers whose own freshness windows have lapsed. Fantasy commands additionally reuse their live context — the Yahoo matchup view, weekly scoreboard, roster slots, odds, daily stat overlay, and player game logs — for five minutes, so repeat runs inside that window render instantly. If that sync fails, the command serves the last successful data with a staleness notice; MLB commands keep their own per-dataset refresh windows.
+Fantasy commands (`m`, `mm`, `r`, `rt`, `h`, `p`) check when the last successful Yahoo sync ran; when it is missing or older than 6 hours, they run a blocking sync with progress output before rendering; that sync refreshes only providers whose own freshness windows have lapsed. Fantasy commands additionally reuse their live context — the Yahoo matchup view, weekly scoreboard, roster slots, odds, daily stat overlay, and player game logs — for five minutes, so repeat runs inside that window render instantly. If that sync fails, the command serves the last successful data with a staleness notice; MLB commands keep their own per-dataset refresh windows.
 
 When the Yahoo league reports its season has ended, the next `skout sync` captures the final snapshot and archives that league locally; later syncs skip it and never overwrite its data. The `-S`/`--season` flag on `m`, `r`, `rt`, `h`, and `p` reads an archived season entirely from the local database, with no provider requests, and labels the output as archived.
 

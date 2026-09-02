@@ -52,6 +52,10 @@ func TestFantasyContractDispatchesEveryValueOnce(t *testing.T) {
 					calls++
 					return strings.Join([]string{"m", league, team, strconv.Itoa(week), boolText(weekly), day, boolText(debug)}, ":") + "\n", nil
 				},
+				Matchups: func(league string, week int, _ int, debug bool) (string, error) {
+					calls++
+					return strings.Join([]string{"mm", league, strconv.Itoa(week), boolText(debug)}, ":") + "\n", nil
+				},
 				Roster: func(league, team string, _ int, debug bool) (string, error) {
 					calls++
 					return strings.Join([]string{"r", league, team, boolText(debug)}, ":") + "\n", nil
@@ -82,10 +86,13 @@ func TestFantasyContractDispatchesEveryValueOnce(t *testing.T) {
 }
 
 func TestMatchupSyntaxRejectsBeforeHandler(t *testing.T) {
-	for _, args := range [][]string{{"m", "-w", "0"}, {"m", "-D", "Feb-30"}, {"m", "-W", "-D", "Apr-01"}} {
+	for _, args := range [][]string{{"m", "-w", "0"}, {"m", "-D", "Feb-30"}, {"m", "-W", "-D", "Apr-01"}, {"mm", "-w", "0"}, {"mm", "-w", "abc"}} {
 		called := false
 		var stdout, stderr bytes.Buffer
-		code := Run(args, "0.4.0", Context{Stdout: &stdout, Stderr: &stderr}, Handlers{Matchup: func(string, string, int, bool, string, int, bool) (string, error) { called = true; return "", nil }})
+		code := Run(args, "0.4.0", Context{Stdout: &stdout, Stderr: &stderr}, Handlers{
+			Matchup:  func(string, string, int, bool, string, int, bool) (string, error) { called = true; return "", nil },
+			Matchups: func(string, int, int, bool) (string, error) { called = true; return "", nil },
+		})
 		if code != 2 || called || stdout.Len() != 0 || !strings.Contains(stderr.String(), "error:") {
 			t.Fatalf("args=%v code=%d called=%v stdout=%q stderr=%q", args, code, called, stdout.String(), stderr.String())
 		}
@@ -96,6 +103,9 @@ func TestSeasonFlagDispatchesAndValidates(t *testing.T) {
 	handlers := Handlers{
 		Matchup: func(_, _ string, _ int, _ bool, _ string, season int, _ bool) (string, error) {
 			return "m:" + strconv.Itoa(season), nil
+		},
+		Matchups: func(_ string, _ int, season int, _ bool) (string, error) {
+			return "mm:" + strconv.Itoa(season), nil
 		},
 		Roster:       func(_, _ string, season int, _ bool) (string, error) { return "r:" + strconv.Itoa(season), nil },
 		RosterTotals: func(_, _ string, season int, _ bool) (string, error) { return "rt:" + strconv.Itoa(season), nil },
@@ -113,6 +123,7 @@ func TestSeasonFlagDispatchesAndValidates(t *testing.T) {
 		{[]string{"r", "-S", "2026"}, "r:2026"},
 		{[]string{"rt", "--season", "2026"}, "rt:2026"},
 		{[]string{"m", "-S", "2026"}, "m:2026"},
+		{[]string{"mm", "-S", "2026"}, "mm:2026"},
 		{[]string{"h", "-S", "2026"}, "h:2026"},
 		{[]string{"p", "-S", "2026"}, "p:2026"},
 		{[]string{"r"}, "r:0"},

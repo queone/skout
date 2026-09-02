@@ -1042,3 +1042,76 @@ func StableMatchupPlayers(players []domain.PlayerWeekStats) {
 		return players[i].YahooPlayerID < players[j].YahooPlayerID
 	})
 }
+
+// LeagueMatchupsOptions selects the week for the league-wide matchup view.
+type LeagueMatchupsOptions struct {
+	Week int
+}
+
+// LeagueMatchups renders every matchup for one week as category totals; the
+// renderer lists the saved team's pairing first.
+func (service *MatchupService) LeagueMatchups(options LeagueMatchupsOptions) (string, error) {
+	if service == nil || service.Store == nil || service.League == "" {
+		return "", fmt.Errorf("matchups: runtime boundaries are incomplete; reinstall skout")
+	}
+	if options.Week < 0 {
+		return "", fmt.Errorf("matchups: week must be positive")
+	}
+	if err := service.ensureFreshYahoo(); err != nil {
+		return "", err
+	}
+	teams, err := service.Store.FantasyTeams(service.League)
+	if err != nil {
+		return "", fantasyError("matchups", "read teams", err)
+	}
+	current, err := service.Store.FantasyCurrentWeek(service.League)
+	if err != nil || current == nil {
+		if err == nil {
+			err = fmt.Errorf("league current week is unavailable")
+		}
+		return "", fantasyError("matchups", "read current week", err)
+	}
+	if options.Week > *current {
+		return "", fmt.Errorf("matchups: week %d is in the future; choose week %d or earlier", options.Week, *current)
+	}
+	week := *current
+	if options.Week > 0 {
+		week = options.Week
+	}
+	rows, stale, err := service.weekScoreboard(week, week < *current || service.ArchivedSeason > 0)
+	if err != nil {
+		return "", fmt.Errorf("matchups: %w", err)
+	}
+	view := domain.LeagueMatchupsView{Week: week, Teams: fantasyTeamsFromStore(teams), TeamKey: service.TeamKey, Stale: stale && service.ArchivedSeason == 0}
+	for _, row := range rows {
+		if row.Week != week {
+			continue
+		}
+		if view.WeekStart == "" {
+			view.WeekStart, view.WeekEnd = row.WeekStart, row.WeekEnd
+		}
+		view.Matchups = append(view.Matchups, row)
+	}
+	if len(view.Matchups) == 0 {
+		return "", fmt.Errorf("matchups: week %d has no matchups; run skout sync and retry", week)
+	}
+	output := display.RenderLeagueMatchups(view, service.Mode)
+	if service.ArchivedSeason > 0 {
+		output = display.ArchivedNotice(service.ArchivedSeason, service.Mode) + output
+	}
+	return output, nil
+}
+
+// weekScoreboard serves the week's scoreboard snapshot inside the live reuse
+// window before using the refresh-then-stale scoreboard path.
+func (service *MatchupService) weekScoreboard(week int, preferSnapshot bool) ([]domain.Matchup, bool, error) {
+	scope := fmt.Sprintf("%s:%d", service.League, week)
+	snapshot, err := service.Store.CommandSnapshot("match_scoreboard", "yahoo", scope)
+	if err == nil && snapshot != nil && snapshot.SnapshotVersion == "v1" && !snapshot.Stale && service.now().Sub(snapshot.LastSuccessfulAt) <= liveReuseWindow {
+		var rows []domain.Matchup
+		if json.Unmarshal([]byte(snapshot.Payload), &rows) == nil && validMatchupRows(rows) {
+			return rows, false, nil
+		}
+	}
+	return service.scoreboard(week, preferSnapshot)
+}

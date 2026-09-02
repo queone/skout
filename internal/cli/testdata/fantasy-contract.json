@@ -1,5 +1,33 @@
 [
   {
+    "name": "league-matchups",
+    "args": ["mm"],
+    "code": 0,
+    "stdout": "mm::0:false\n",
+    "stderr": ""
+  },
+  {
+    "name": "league-matchups-week",
+    "args": ["mm", "-w", "22"],
+    "code": 0,
+    "stdout": "mm::22:false\n",
+    "stderr": ""
+  },
+  {
+    "name": "league-matchups-season",
+    "args": ["mm", "-S", "2026"],
+    "code": 0,
+    "stdout": "mm::0:false\n",
+    "stderr": ""
+  },
+  {
+    "name": "league-matchups-all-selectors",
+    "args": ["-d", "-l", "mlb.l.9", "mm", "-w", "4"],
+    "code": 0,
+    "stdout": "mm:mlb.l.9:4:true\n",
+    "stderr": "skout debug: command=mm league_source=override\n"
+  },
+  {
     "name": "matchup-all-selectors",
     "args": ["-d", "-l", "mlb.l.9", "m", "Toros", "-w", "4"],
     "code": 0,

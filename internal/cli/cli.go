@@ -36,6 +36,7 @@ type Handlers struct {
 	Sync         func(league, team string, debug bool, output io.Writer) (string, error)
 	Reset        func(input io.Reader, output io.Writer) error
 	Matchup      func(league, team string, week int, weekly bool, day string, season int, debug bool) (string, error)
+	Matchups     func(league string, week int, season int, debug bool) (string, error)
 	Teams        func(team string, force, debug bool) (string, error)
 	Totals       func(force, debug bool) (string, error)
 	Probables    func(force, debug bool) (string, error)
@@ -64,6 +65,7 @@ var commands = []commandSpec{
 	{name: "sync", label: "sync", description: "Synchronize the selected league", flags: []flagSpec{{"-T", "--team", "TEAM", "Select the primary fantasy team", false}}},
 	{name: "reset", label: "reset", description: "Delete the local skout database"},
 	{name: "m", label: "m [team]", description: "Show a daily or weekly matchup", positional: "NAME", maximum: 1, flags: []flagSpec{{"-w", "--week", "WEEK", "Show a specific matchup week", false}, {"-W", "--weekly", "", "Show weekly running totals", false}, {"-D", "--day", "MMM-DD", "Show stats for a specific day", false}, seasonFlag()}},
+	{name: "mm", label: "mm", description: "Show every league matchup for the week", flags: []flagSpec{{"-w", "--week", "WEEK", "Show a specific matchup week", false}, seasonFlag()}},
 	{name: "t", label: "t [team]", description: "Show MLB 40-man rosters", positional: "TEAM", maximum: 1, flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
 	{name: "tt", label: "tt", description: "Show MLB standings and team totals", flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
 	{name: "sp", label: "sp", description: "Show the three-day probable-pitcher slate", flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
@@ -140,6 +142,11 @@ func ProductionHandlers(version string, context Context) Handlers {
 		Matchup: func(league, team string, week int, weekly bool, day string, season int, _ bool) (string, error) {
 			return withMatchup(league, season, func(service *app.MatchupService) (string, error) {
 				return service.Matchup(app.MatchupOptions{Team: team, Week: week, Weekly: weekly, Day: day})
+			})
+		},
+		Matchups: func(league string, week int, season int, _ bool) (string, error) {
+			return withMatchup(league, season, func(service *app.MatchupService) (string, error) {
+				return service.LeagueMatchups(app.LeagueMatchupsOptions{Week: week})
 			})
 		},
 		Teams: func(team string, force, debug bool) (string, error) {
@@ -289,6 +296,16 @@ func Run(args []string, version string, context Context, handlers Handlers) int 
 		} else {
 			output, err = handlers.Matchup(parsed.league, team, week, parsed.booleans["weekly"], parsed.values["day"], seasonValue(parsed), parsed.debug)
 		}
+	case "mm":
+		week := 0
+		if parsed.values["week"] != "" {
+			week, _ = strconv.Atoi(parsed.values["week"])
+		}
+		if handlers.Matchups == nil {
+			err = fmt.Errorf("matchups: runtime is unavailable; reinstall skout")
+		} else {
+			output, err = handlers.Matchups(parsed.league, week, seasonValue(parsed), parsed.debug)
+		}
 	case "t":
 		team := ""
 		if len(parsed.positionals) > 0 {
@@ -432,7 +449,7 @@ func parse(args []string) (parsedInvocation, string) {
 	if len(parsed.positionals) < spec.minimum {
 		return parsedInvocation{}, missingPositional(spec, len(parsed.positionals))
 	}
-	if spec.name == "m" && parsed.values["week"] != "" {
+	if (spec.name == "m" || spec.name == "mm") && parsed.values["week"] != "" {
 		week, err := strconv.Atoi(parsed.values["week"])
 		if err != nil {
 			return parsedInvocation{}, fmt.Sprintf("error: invalid value '%s' for '--week <WEEK>': invalid digit found in string\n\nFor more information, try '--help'.\n", parsed.values["week"])

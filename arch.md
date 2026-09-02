@@ -40,14 +40,14 @@ Yahoo synchronization acquires independent team rosters and matchup weeks with a
 
 - `cmd/skout`: process entrypoint, version declaration, and production dependency wiring.
 - `internal/cli`: descriptor grammar, help, streams, diagnostics, and command dispatch.
-- `internal/app`: synchronization, confirmed local-database reset, origin-pinned fetch, local status, MLB commands, fantasy-player views, and matchup orchestration.
+- `internal/app`: synchronization, confirmed local-database reset, origin-pinned fetch, local status, MLB commands, fantasy-player views, and matchup and league-scoreboard orchestration.
 - `internal/analysis`: deterministic pitcher-role, projection-window, percentile, and waiver-eligibility helpers.
 - `internal/domain`: provider-neutral fantasy, roster, standings, totals, and slate records.
 - `internal/providers`: bounded public Yahoo, MLB StatsAPI, Baseball Savant, FanGraphs, FantasyPros, RotoWire, ESPN, and OddsShark adapters.
 - `internal/transport`: validated HTTPS or loopback-test requests, one deadline across redirects and body reads, manual redirect policy, response limits, and deterministic lowercase headers.
 - `internal/cache`: `skout-cache-v1` raw payload storage with SHA-256 names, a 32 MiB limit, private atomic writes, symlink rejection, and deterministic pruning.
 - `internal/store`: schema-version-6 creation and migration, shared and exclusive database-operation locking, one dedicated SQLite connection, complete fantasy and enrichment replacement, snapshots, freshness, sync runs, and read-only status inspection.
-- `internal/display`: deterministic fantasy matchup, roster, totals, pool, detail-card, MLB, glossary, help, and status presentation with ANSI-safe semantic styling.
+- `internal/display`: deterministic fantasy matchup, league scoreboard, roster, totals, pool, detail-card, MLB, glossary, help, and status presentation with ANSI-safe semantic styling.
 - `internal/config`: private JSON configuration with atomic replacement and compatible deprecated-field reads.
 - `internal/terminal`: injected color selection and semantic roles.
 - `build.sh`: canonical Go validation, installation, preparation, and release entrypoint.

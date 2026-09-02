@@ -389,3 +389,131 @@ func TestDailyYahooFixtureNormalizesSelectedDateRoster(t *testing.T) {
 		t.Fatalf("roster=%#v err=%v", roster, err)
 	}
 }
+
+func leagueMatchupRows() []domain.Matchup {
+	return []domain.Matchup{
+		{Week: 7, WeekStart: "2026-08-24", WeekEnd: "2026-08-30", Teams: [2]domain.MatchupTeam{{TeamKey: "mlb.l.1.t.3", TeamID: 3, Name: "Sluggers", Stats: map[string]string{"7": "30"}, Wins: 5, Losses: 5}, {TeamKey: "mlb.l.1.t.4", TeamID: 4, Name: "Closers", Stats: map[string]string{"7": "27"}, Wins: 5, Losses: 5}}},
+		{Week: 7, WeekStart: "2026-08-24", WeekEnd: "2026-08-30", Teams: [2]domain.MatchupTeam{{TeamKey: "mlb.l.1.t.1", TeamID: 1, Name: "Operators", Stats: map[string]string{"7": "29"}, Wins: 7, Ties: 2, Losses: 1}, {TeamKey: "mlb.l.1.t.2", TeamID: 2, Name: "Rivals", Stats: map[string]string{"7": "19"}, Wins: 1, Ties: 2, Losses: 7}}},
+	}
+}
+
+func TestLeagueMatchupsFetchesScoreboardOncePersistsAndReusesWithinWindow(t *testing.T) {
+	current := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	database := fantasyAppStoreWithClock(t, adjustableClock{&current})
+	calls := 0
+	service := &MatchupService{
+		Store: database, League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", Season: 2026,
+		Now: func() time.Time { return current }, Mode: terminal.Plain,
+		Scoreboard: func(string, *int) ([]domain.Matchup, error) { calls++; return leagueMatchupRows(), nil },
+	}
+	defer service.Close()
+	output, err := service.LeagueMatchups(LeagueMatchupsOptions{})
+	if err != nil || calls != 1 || !strings.Contains(output, "MATCHUPS WEEK: 7 of 26") {
+		t.Fatalf("calls=%d output=%q err=%v", calls, output, err)
+	}
+	for _, name := range []string{"Operators", "Rivals", "Sluggers", "Closers"} {
+		if !strings.Contains(output, name) {
+			t.Fatalf("missing %s in %q", name, output)
+		}
+	}
+	if strings.Index(output, "Operators") > strings.Index(output, "Sluggers") {
+		t.Fatalf("saved team's matchup is not first: %q", output)
+	}
+	snapshot, err := database.CommandSnapshot("match_scoreboard", "yahoo", "mlb.l.1:7")
+	if err != nil || snapshot == nil || snapshot.SnapshotVersion != "v1" || snapshot.Stale {
+		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
+	}
+	if _, err := service.LeagueMatchups(LeagueMatchupsOptions{}); err != nil || calls != 1 {
+		t.Fatalf("reused calls=%d err=%v", calls, err)
+	}
+	current = current.Add(liveReuseWindow + time.Minute)
+	if _, err := service.LeagueMatchups(LeagueMatchupsOptions{}); err != nil || calls != 2 {
+		t.Fatalf("lapsed calls=%d err=%v", calls, err)
+	}
+}
+
+func TestLeagueMatchupsServesStaleSnapshotAndNamesSyncWhenNoneExists(t *testing.T) {
+	current := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	database := fantasyAppStoreWithClock(t, adjustableClock{&current})
+	payload, err := json.Marshal(leagueMatchupRows())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SaveCommandSnapshot("match_scoreboard", "yahoo", "mlb.l.1:7", "v1", string(payload)); err != nil {
+		t.Fatal(err)
+	}
+	current = current.Add(liveReuseWindow + time.Minute)
+	failing := func(string, *int) ([]domain.Matchup, error) { return nil, errors.New("yahoo down") }
+	service := &MatchupService{
+		Store: database, League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", Season: 2026,
+		Now: func() time.Time { return current }, Mode: terminal.Plain, Scoreboard: failing,
+	}
+	defer service.Close()
+	output, err := service.LeagueMatchups(LeagueMatchupsOptions{})
+	if err != nil || !strings.Contains(output, "STALE — Yahoo unavailable") || !strings.Contains(output, "Operators") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	snapshot, err := database.CommandSnapshot("match_scoreboard", "yahoo", "mlb.l.1:7")
+	if err != nil || snapshot == nil || !snapshot.Stale {
+		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
+	}
+	empty := &MatchupService{
+		Store: fantasyAppStore(t, current), League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", Season: 2026,
+		Now: func() time.Time { return current }, Mode: terminal.Plain, Scoreboard: failing,
+	}
+	defer empty.Close()
+	if _, err := empty.LeagueMatchups(LeagueMatchupsOptions{}); err == nil || !strings.HasPrefix(err.Error(), "matchups:") || !strings.Contains(err.Error(), "skout sync") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestLeagueMatchupsRejectsBadWeeksAndServesArchivedSeasonWithoutProviders(t *testing.T) {
+	now := time.Date(2027, 5, 1, 12, 0, 0, 0, time.UTC)
+	database := fantasyAppStore(t, now)
+	payload, err := json.Marshal(leagueMatchupRows())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SaveCommandSnapshot("match_scoreboard", "yahoo", "mlb.l.1:7", "v1", string(payload)); err != nil {
+		t.Fatal(err)
+	}
+	service := &MatchupService{
+		Store: database, League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", Season: 2026, ArchivedSeason: 2026,
+		Now: func() time.Time { return now }, Mode: terminal.Plain,
+	}
+	defer service.Close()
+	if _, err := service.LeagueMatchups(LeagueMatchupsOptions{Week: 8}); err == nil || err.Error() != "matchups: week 8 is in the future; choose week 7 or earlier" {
+		t.Fatalf("future err=%v", err)
+	}
+	if _, err := service.LeagueMatchups(LeagueMatchupsOptions{Week: -1}); err == nil || err.Error() != "matchups: week must be positive" {
+		t.Fatalf("negative err=%v", err)
+	}
+	output, err := service.LeagueMatchups(LeagueMatchupsOptions{})
+	if err != nil || !strings.Contains(output, "ARCHIVED — season 2026") || !strings.Contains(output, "MATCHUPS WEEK: 7 of 26") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	if week, err := service.LeagueMatchups(LeagueMatchupsOptions{Week: 7}); err != nil || week != output {
+		t.Fatalf("week output=%q err=%v", week, err)
+	}
+}
+
+func TestLeagueMatchupsEnforcesTheSixHourAutoSyncGate(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	service := &MatchupService{
+		Store: fantasyAppStore(t, now), League: "mlb.l.1", TeamKey: "mlb.l.1.t.1", Season: 2026,
+		Now: func() time.Time { return now }, Mode: terminal.Plain,
+		Scoreboard: func(string, *int) ([]domain.Matchup, error) { return leagueMatchupRows(), nil },
+	}
+	defer service.Close()
+	calls := 0
+	service.AutoSync = func() error {
+		calls++
+		return service.Store.MarkSyncItemSuccess("yahoo_public", "fantasy", "mlb.l.1", syncPipelineVersion)
+	}
+	if _, err := service.LeagueMatchups(LeagueMatchupsOptions{}); err != nil || calls != 1 {
+		t.Fatalf("missing sync state: calls=%d err=%v", calls, err)
+	}
+	if _, err := service.LeagueMatchups(LeagueMatchupsOptions{}); err != nil || calls != 1 {
+		t.Fatalf("fresh sync state: calls=%d err=%v", calls, err)
+	}
+}

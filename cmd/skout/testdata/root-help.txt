@@ -14,6 +14,9 @@ COMMANDS
     -W, --weekly               Show weekly running totals
     -D, --day <MMM-DD>         Show stats for a specific day
     -S, --season <SEASON>      Show an archived season
+  mm                           Show every league matchup for the week
+    -w, --week <WEEK>          Show a specific matchup week
+    -S, --season <SEASON>      Show an archived season
   t [team]                     Show MLB 40-man rosters
     -f, --force                Refresh provider data
   tt                           Show MLB standings and team totals

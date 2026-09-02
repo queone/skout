@@ -1,0 +1,8 @@
+MATCHUPS WEEK: 7 of 26 (Mon aug-24 / Sun aug-30)
+
+TEAM       RANK  REC         SCORE    R  HR RBI  SB   AVG    W  SV   K   ERA  WHIP
+Operators   1st  4-2-0       7-2-1   29   4  25   5  .237    2   1  65  2.87  1.24
+Rivals      2nd  2-4-0       1-2-7   19   4  19   2  .235    4   1  25  4.39  1.69
+
+Sluggers    3rd  3-3-1       5-0-5   30   7  24   4 0.289    4   3  56  3.60  1.23
+Closers       —  —           5-0-5   27   9  36   5  .272    4   0  50  4.15     —

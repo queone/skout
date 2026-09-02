@@ -203,6 +203,18 @@ type LocalMatchupView struct {
 	Players  []StoredFantasyPlayer
 }
 
+// LeagueMatchupsView is every head-to-head matchup for one week with the
+// saved team's pairing listed first.
+type LeagueMatchupsView struct {
+	Week      int
+	WeekStart string
+	WeekEnd   string
+	Matchups  []Matchup
+	Teams     []FantasyTeam
+	TeamKey   string
+	Stale     bool
+}
+
 // FantasyRosterSlot associates one player with one team's assigned slot.
 type FantasyRosterSlot struct {
 	TeamKey       string   `json:"team_key"`

@@ -97,3 +97,75 @@ func TestMatchupCellColorsInactiveRowsDarkRed(t *testing.T) {
 		})
 	}
 }
+
+func sampleLeagueMatchupsView() domain.LeagueMatchupsView {
+	return domain.LeagueMatchupsView{
+		Week: 7, WeekStart: "2026-08-24", WeekEnd: "2026-08-30", TeamKey: "t.1",
+		Matchups: []domain.Matchup{
+			{Week: 7, WeekStart: "2026-08-24", WeekEnd: "2026-08-30", Teams: [2]domain.MatchupTeam{
+				{TeamKey: "t.3", Name: "Sluggers", Wins: 5, Losses: 5, Stats: map[string]string{"7": "30", "12": "7", "13": "24", "16": "4", "3": "0.289", "28": "4", "32": "3", "42": "56", "26": "3.60", "27": "1.23"}},
+				{TeamKey: "t.4", Name: "Closers", Wins: 5, Losses: 5, Stats: map[string]string{"7": "27", "12": "9", "13": "36", "16": "5", "3": ".272", "28": "4", "32": "0", "42": "50", "26": "4.15"}},
+			}},
+			{Week: 7, WeekStart: "2026-08-24", WeekEnd: "2026-08-30", Teams: [2]domain.MatchupTeam{
+				{TeamKey: "t.1", Name: "💎 Operators", Wins: 7, Ties: 2, Losses: 1, Stats: map[string]string{"7": "29", "12": "4", "13": "25", "16": "5", "3": ".237", "28": "2", "32": "1", "42": "65", "26": "2.87", "27": "1.24"}},
+				{TeamKey: "t.2", Name: "Rivals", Wins: 1, Ties: 2, Losses: 7, Stats: map[string]string{"7": "19", "12": "4", "13": "19", "16": "2", "3": ".235", "28": "4", "32": "1", "42": "25", "26": "4.39", "27": "1.69"}},
+			}},
+		},
+		Teams: []domain.FantasyTeam{{TeamKey: "t.1", Name: "Operators", Rank: 1, Wins: 4, Losses: 2}, {TeamKey: "t.2", Name: "Rivals", Rank: 2, Wins: 2, Losses: 4}, {TeamKey: "t.3", Name: "Sluggers", Rank: 3, Wins: 3, Losses: 3, Ties: 1}},
+	}
+}
+
+func TestLeagueMatchupsGoldenListsSavedTeamFirstWithStaleLine(t *testing.T) {
+	view := sampleLeagueMatchupsView()
+	plain := RenderLeagueMatchups(view, terminal.Plain)
+	assertDisplayGolden(t, "testdata/fantasy/league-matchups.txt", plain)
+	if strings.Contains(plain, "💎") || strings.Index(plain, "Operators") > strings.Index(plain, "Sluggers") {
+		t.Fatalf("plain=%q", plain)
+	}
+	view.Stale = true
+	stale := RenderLeagueMatchups(view, terminal.Plain)
+	lines := strings.Split(stale, "\n")
+	if lines[1] != "STALE — Yahoo unavailable; showing the last complete scoreboard snapshot" || lines[2] != "" {
+		t.Fatalf("stale=%q", stale)
+	}
+}
+
+func TestLeagueMatchupsColorsWinnersLosersTiesAndScoresWithStableWidths(t *testing.T) {
+	view := sampleLeagueMatchupsView()
+	plain := RenderLeagueMatchups(view, terminal.Plain)
+	colored := RenderLeagueMatchups(view, terminal.Color)
+	plainLines, coloredLines := strings.Split(plain, "\n"), strings.Split(colored, "\n")
+	if len(plainLines) != len(coloredLines) {
+		t.Fatalf("plain=%q colored=%q", plain, colored)
+	}
+	for index := range plainLines {
+		if terminal.VisibleWidth(plainLines[index]) != terminal.VisibleWidth(coloredLines[index]) {
+			t.Fatalf("line %d width plain=%d color=%d", index, terminal.VisibleWidth(plainLines[index]), terminal.VisibleWidth(coloredLines[index]))
+		}
+	}
+	operators, rivals, sluggers, closers := coloredLines[3], coloredLines[4], coloredLines[6], coloredLines[7]
+	for name, test := range map[string]struct{ line, want string }{
+		"SavedTeamNameGreen":     {operators, terminal.Good("Operators", terminal.Color)},
+		"LeadingScoreGreen":      {operators, terminal.Good("7-2-1 ", terminal.Color)},
+		"TrailingScoreRed":       {rivals, terminal.Injury("1-2-7 ", terminal.Color)},
+		"TiedScoreYellow":        {sluggers, terminal.Warning("5-0-5 ", terminal.Color)},
+		"DimRank":                {operators, terminal.Dim(" 1st", terminal.Color)},
+		"DimMissingRecord":       {closers, terminal.Dim("—         ", terminal.Color)},
+		"RunsWinnerGreen":        {operators, terminal.Good("  29", terminal.Color)},
+		"RunsLoserRed":           {rivals, terminal.Injury("  19", terminal.Color)},
+		"LowERAWinsGreen":        {operators, terminal.Good("  2.87", terminal.Color)},
+		"HighERALosesRed":        {rivals, terminal.Injury("  4.39", terminal.Color)},
+		"LowWHIPWinsGreen":       {operators, terminal.Good("  1.24", terminal.Color)},
+		"HighWHIPLosesRed":       {rivals, terminal.Injury("  1.69", terminal.Color)},
+		"TiedHomeRunsPlain":      {operators, terminal.Good("  29", terminal.Color) + "   4" + terminal.Good("  25", terminal.Color)},
+		"MissingWHIPPlain":       {closers, terminal.Injury("  4.15", terminal.Color) + "     —"},
+		"OpponentOfMissingPlain": {sluggers, terminal.Good("  3.60", terminal.Color) + "  1.23"},
+	} {
+		if !strings.Contains(test.line, test.want) {
+			t.Errorf("%s: %q lacks %q", name, test.line, test.want)
+		}
+	}
+	if strings.Contains(operators, terminal.Good("   4", terminal.Color)) || strings.Contains(rivals, terminal.Injury("   4", terminal.Color)) {
+		t.Fatalf("tied category colored: operators=%q rivals=%q", operators, rivals)
+	}
+}
