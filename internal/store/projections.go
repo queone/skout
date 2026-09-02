@@ -303,9 +303,8 @@ func (store *Store) replaceECR(rows []ECRWrite, afterClear func() error) (int, e
 			if row.YahooPlayerID != nil {
 				result, updateErr = executor.ExecContext(ctx, "UPDATE players SET ecr=? WHERE yahoo_player_id=?", row.Rank, *row.YahooPlayerID)
 			} else {
-				result, updateErr = executor.ExecContext(ctx, `UPDATE players SET ecr=? WHERE id=(
-SELECT id FROM players WHERE LOWER(name)=LOWER(?) AND mlb_team=?
-GROUP BY LOWER(name),mlb_team HAVING COUNT(*)=1)`, row.Rank, strings.TrimSpace(row.Name), strings.ToUpper(strings.TrimSpace(row.Team)))
+				name, team := strings.TrimSpace(row.Name), strings.ToUpper(strings.TrimSpace(row.Team))
+				result, updateErr = executor.ExecContext(ctx, "UPDATE players SET ecr=? WHERE "+ecrFallbackFilter("players")+" AND ("+ecrFallbackIdentityCount+")=1", row.Rank, team, name, name, team, name, name)
 			}
 			if updateErr != nil {
 				return operationError(operation, store.path, updateErr)
@@ -405,13 +404,25 @@ ORDER BY CASE WHEN mlbam_match_source='seed' THEN 0 ELSE 1 END DESC,id LIMIT 1`,
 	return playerID, err
 }
 
+// ecrFallbackFilter matches Yahoo-linked rows by team and name, including the
+// "(Batter)" entity Yahoo carries for a two-way player. Bind team, name, name.
+func ecrFallbackFilter(alias string) string {
+	return alias + ".yahoo_player_id IS NOT NULL AND " + alias + ".mlb_team=? AND (LOWER(" + alias + ".name)=LOWER(?) OR LOWER(" + alias + ".name)=LOWER(?)||' (batter)')"
+}
+
+// ecrFallbackIdentityCount counts distinct people behind a fallback match so a
+// two-way pair sharing one MLBAM identity resolves while true twins stay
+// ambiguous. Bind team, name, name.
+var ecrFallbackIdentityCount = "SELECT COUNT(DISTINCT COALESCE(p2.mlbam_id,-p2.id)) FROM players p2 WHERE " + ecrFallbackFilter("p2")
+
 func ecrIdentityCount(ctx context.Context, executor sqlExecutor, row ECRWrite) (int64, error) {
 	var count int64
 	if row.YahooPlayerID != nil {
 		err := executor.QueryRowContext(ctx, "SELECT COUNT(*) FROM players WHERE yahoo_player_id=?", *row.YahooPlayerID).Scan(&count)
 		return count, err
 	}
-	err := executor.QueryRowContext(ctx, "SELECT COUNT(*) FROM players WHERE LOWER(name)=LOWER(?) AND mlb_team=?", strings.TrimSpace(row.Name), strings.ToUpper(strings.TrimSpace(row.Team))).Scan(&count)
+	name, team := strings.TrimSpace(row.Name), strings.ToUpper(strings.TrimSpace(row.Team))
+	err := executor.QueryRowContext(ctx, ecrFallbackIdentityCount, team, name, name).Scan(&count)
 	return count, err
 }
 

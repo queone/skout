@@ -503,7 +503,24 @@ ORDER BY COALESCE(p.yahoo_rank,999999),p.name,p.yahoo_player_id`
 	return output, rows.Err()
 }
 
+// identityClaimStrength ranks how an MLBAM identity was established so a
+// duplicate claim releases the weaker match first.
+func identityClaimStrength(alias string) string {
+	return "CASE " + alias + ".mlbam_match_source WHEN 'seed' THEN 0 WHEN '40man' THEN 0 WHEN 'manual' THEN 0 WHEN 'injury_tx' THEN 1 WHEN 'jersey+team' THEN 1 WHEN 'name+team+pos' THEN 2 ELSE 3 END"
+}
+
+// releaseDuplicateIdentityClaims clears the weaker claim when two Yahoo
+// entities of one position type hold the same MLBAM identity. Only a
+// batter-and-pitcher pair may legitimately share one.
+var releaseDuplicateIdentityClaims = fmt.Sprintf(`UPDATE players SET mlbam_id=NULL,mlbam_match_source=NULL,mlbam_matched_at=NULL,birth_date=NULL,birth_date_fetched_at=NULL
+WHERE yahoo_player_id IS NOT NULL AND mlbam_id IS NOT NULL AND EXISTS (
+SELECT 1 FROM players keeper WHERE keeper.yahoo_player_id IS NOT NULL AND keeper.id<>players.id AND keeper.mlbam_id=players.mlbam_id
+AND COALESCE(keeper.position_type,'')=COALESCE(players.position_type,'')
+AND (%[1]s<%[2]s OR (%[1]s=%[2]s AND keeper.id<players.id)))`, identityClaimStrength("keeper"), identityClaimStrength("players"))
+
 // ReconcileMLBIdentities assigns only exact, unique normalized MLB candidates.
+// It first releases duplicate same-role claims and never assigns an identity
+// another Yahoo entity of the same role already holds.
 func (store *Store) ReconcileMLBIdentities(candidates []IdentityCandidate) (int, error) {
 	const operation = "reconcile MLB identities"
 	now, err := store.capturedUnix(operation)
@@ -524,6 +541,9 @@ func (store *Store) ReconcileMLBIdentities(candidates []IdentityCandidate) (int,
 	}
 	updated := 0
 	err = store.immediate(operation, func(ctx context.Context, executor sqlExecutor) error {
+		if _, err := executor.ExecContext(ctx, releaseDuplicateIdentityClaims); err != nil {
+			return operationError(operation, store.path, err)
+		}
 		rows, err := executor.QueryContext(ctx, "SELECT id,name,COALESCE(mlb_team,''),COALESCE(position_type,'') FROM players WHERE yahoo_player_id IS NOT NULL AND mlbam_id IS NULL ORDER BY id")
 		if err != nil {
 			return operationError(operation, store.path, err)
@@ -554,7 +574,8 @@ func (store *Store) ReconcileMLBIdentities(candidates []IdentityCandidate) (int,
 			for candidateID := range ids {
 				mlbamID = candidateID
 			}
-			result, err := executor.ExecContext(ctx, "UPDATE players SET mlbam_id=?,mlbam_match_source='name+team+pos',mlbam_matched_at=? WHERE id=? AND mlbam_id IS NULL", mlbamID, now, player.id)
+			result, err := executor.ExecContext(ctx, `UPDATE players SET mlbam_id=?,mlbam_match_source='name+team+pos',mlbam_matched_at=? WHERE id=? AND mlbam_id IS NULL
+AND NOT EXISTS (SELECT 1 FROM players held WHERE held.yahoo_player_id IS NOT NULL AND held.mlbam_id=? AND COALESCE(held.position_type,'')=?)`, mlbamID, now, player.id, mlbamID, player.role)
 			if err != nil {
 				return operationError(operation, store.path, err)
 			}

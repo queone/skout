@@ -104,7 +104,9 @@ func TestECRReplacementUsesPrimaryFallbackAndRollbackRules(t *testing.T) {
 	defer database.Close()
 	if _, err := database.conn.ExecContext(testContext(), `
 INSERT INTO players(id,yahoo_player_id,name,mlb_team,ecr,synced_at) VALUES
-(1,10,'Primary','NYY',99,1),(2,11,'Fallback','BOS',98,1),(3,12,'Twin','SEA',97,1),(4,13,'Twin','SEA',96,1),(5,14,'Old','LAD',95,1)`); err != nil {
+(1,10,'Primary','NYY',99,1),(2,11,'Fallback','BOS',98,1),(3,12,'Twin','SEA',97,1),(4,13,'Twin','SEA',96,1),(5,14,'Old','LAD',95,1);
+INSERT INTO players(id,yahoo_player_id,mlbam_id,name,mlb_team,position_type,synced_at) VALUES
+(6,15,660271,'Two Way','LAD','P',1),(7,16,660271,'Two Way (Batter)','LAD','B',1),(8,NULL,660271,'Two Way','LAD','P',1),(9,NULL,700009,'Fallback','BOS','B',1)`); err != nil {
 		t.Fatal(err)
 	}
 	yahooID := int64(10)
@@ -112,8 +114,9 @@ INSERT INTO players(id,yahoo_player_id,name,mlb_team,ecr,synced_at) VALUES
 		{YahooPlayerID: &yahooID, Name: "ignored", Team: "XXX", Rank: 1},
 		{Name: "Fallback", Team: "bos", Rank: 2},
 		{Name: "Twin", Team: "SEA", Rank: 3},
+		{Name: "Two Way", Team: "LAD", Rank: 4},
 	})
-	if err != nil || written != 2 {
+	if err != nil || written != 4 {
 		t.Fatalf("written=%d err=%v", written, err)
 	}
 	var ranked, primary, fallback int64
@@ -122,8 +125,12 @@ INSERT INTO players(id,yahoo_player_id,name,mlb_team,ecr,synced_at) VALUES
 	}
 	_ = database.conn.QueryRowContext(testContext(), "SELECT ecr FROM players WHERE id=1").Scan(&primary)
 	_ = database.conn.QueryRowContext(testContext(), "SELECT ecr FROM players WHERE id=2").Scan(&fallback)
-	if ranked != 2 || primary != 1 || fallback != 2 {
+	if ranked != 4 || primary != 1 || fallback != 2 {
 		t.Fatalf("ranked=%d primary=%d fallback=%d", ranked, primary, fallback)
+	}
+	var twoWay string
+	if err := database.conn.QueryRowContext(testContext(), "SELECT GROUP_CONCAT(id||'='||COALESCE(ecr,'-'),',') FROM (SELECT id,ecr FROM players WHERE id IN (6,7,8,9) ORDER BY id)").Scan(&twoWay); err != nil || twoWay != "6=4,7=4,8=-,9=-" {
+		t.Fatalf("two-way and seed ranks=%q err=%v", twoWay, err)
 	}
 	_, err = database.replaceECR([]ECRWrite{{YahooPlayerID: &yahooID, Name: "Primary", Team: "NYY", Rank: 7}}, func() error { return errors.New("stop") })
 	if err == nil {

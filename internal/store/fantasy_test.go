@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -287,5 +288,62 @@ func TestFantasyIdentityReconciliationIsExactUniqueRoleDistinctAndTimestamped(t 
 	var unresolved int64
 	if err := database.conn.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM players WHERE yahoo_player_id IN (102,103) AND mlbam_id IS NULL").Scan(&unresolved); err != nil || unresolved != 2 {
 		t.Fatalf("unresolved=%d err=%v", unresolved, err)
+	}
+}
+
+func TestFantasyIdentityReconciliationReleasesDuplicateSameRoleClaims(t *testing.T) {
+	database, err := OpenAtWithClock(filepath.Join(t.TempDir(), "claims.db"), testClock{time.Unix(2_000_000_000, 0)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.conn.ExecContext(context.Background(), `
+INSERT INTO players(id,yahoo_player_id,mlbam_id,name,mlb_team,position_type,mlbam_match_source,mlbam_matched_at,birth_date,synced_at) VALUES
+(201,301,805725,'Jake Miller','DET','P','40man',1,'2001-06-27',1),
+(202,302,805725,'Jake Miller','DET','P','name+twoway',1,'2001-06-27',1),
+(203,303,660271,'Two Way','LAD','P','seed',1,'1994-07-05',1),
+(204,304,660271,'Two Way (Batter)','LAD','B','name+twoway',1,'1994-07-05',1),
+(205,305,628708,'Yunior Marte','SF','P','name',1,'1995-02-02',1),
+(206,306,628708,'Yunior Marte','CIN','P','seed',1,'1995-02-02',1),
+(207,307,NULL,'Cade Smith','NYY','P',NULL,NULL,NULL,1),
+(208,308,671922,'Cade Smith','CLE','P','seed',1,'1999-05-09',1)`); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := database.ReconcileMLBIdentities([]IdentityCandidate{
+		{MLBAMID: 805725, Name: "Jake Miller", Team: "DET", Role: "P"},
+		{MLBAMID: 805074, Name: "Yunior Marte", Team: "SF", Role: "P"},
+		{MLBAMID: 671922, Name: "Cade Smith", Team: "CLE", Role: "P"},
+	})
+	if err != nil || updated != 1 {
+		t.Fatalf("updated=%d err=%v", updated, err)
+	}
+	rows, err := database.conn.QueryContext(context.Background(), "SELECT id,COALESCE(mlbam_id,0),COALESCE(mlbam_match_source,''),COALESCE(birth_date,'') FROM players WHERE id BETWEEN 201 AND 208 ORDER BY id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	got := map[int64]string{}
+	for rows.Next() {
+		var id, mlbam int64
+		var source, birth string
+		if err := rows.Scan(&id, &mlbam, &source, &birth); err != nil {
+			t.Fatal(err)
+		}
+		got[id] = fmt.Sprintf("%d/%s/%s", mlbam, source, birth)
+	}
+	want := map[int64]string{
+		201: "805725/40man/2001-06-27",
+		202: "0//",
+		203: "660271/seed/1994-07-05",
+		204: "660271/name+twoway/1994-07-05",
+		205: "805074/name+team+pos/",
+		206: "628708/seed/1995-02-02",
+		207: "0//",
+		208: "671922/seed/1999-05-09",
+	}
+	for id, expected := range want {
+		if got[id] != expected {
+			t.Errorf("player %d=%q want %q", id, got[id], expected)
+		}
 	}
 }

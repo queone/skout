@@ -114,7 +114,7 @@ func (client *SavantClient) fetch(season int64, kind, group string) ([]SavantRow
 	target := *client.endpoints.Root
 	selections := "pa,bbe,xwoba,exit_velocity_avg,barrel_batted_rate,hard_hit_percent,k_percent,bb_percent,sprint_speed,on_base_plus_slg"
 	if group == "pitching" {
-		selections = "pa,bbe,ff_avg_speed,whiff_percent,oz_swing_percent,groundballs_percent,k_percent,bb_percent"
+		selections = "pa,bbe,ff_avg_speed,si_avg_speed,fc_avg_speed,whiff_percent,oz_swing_percent,groundballs_percent,k_percent,bb_percent"
 	}
 	query := target.Query()
 	query.Set("year", strconv.FormatInt(season, 10))
@@ -213,7 +213,7 @@ func ParseSavantCSV(payload []byte, season int64, group string) ([]SavantRow, er
 			StrikeoutPercent:  number("k_percent", "strikeout_percent", "strikeout_pct"),
 			WalkPercent:       number("bb_percent", "walk_percent", "walk_pct"),
 			OPS:               number("on_base_plus_slg", "ops"),
-			FastballVelo:      number("ff_avg_speed", "fastball_velo", "fbv"),
+			FastballVelo:      firstNumber(number("ff_avg_speed", "fastball_velo", "fbv"), number("si_avg_speed", "sinker_velo"), number("fc_avg_speed", "cutter_velo")),
 			WhiffPercent:      number("whiff_percent", "whiff_pct"),
 			ChasePercent:      number("chase_percent", "oz_swing_percent", "ch_pct"),
 			GroundBallPercent: number("groundballs_percent", "gb_percent", "gb_pct"),
@@ -225,8 +225,16 @@ func ParseSavantCSV(payload []byte, season int64, group string) ([]SavantRow, er
 		if needsPA && row.PlateAppearances <= 0 {
 			return nil, invalid(operation, fmt.Sprintf("row %d lacks a required PA/BF denominator", line))
 		}
+		// Savant's custom leaderboard exports a blank batted-ball count, so a
+		// blank count defers to the PA/BF denominator; an explicit zero still
+		// drops the batted-ball rates.
+		battedBalls, battedBallsPresent := savantValue(values, index, "bbe", "batted_ball_events")
+		denominator := row.PlateAppearances
+		if battedBallsPresent && strings.TrimSpace(battedBalls) != "" {
+			denominator = row.BattedBallEvents
+		}
 		needsBBE := group == "batting" && (row.ExitVeloAverage != nil || row.BarrelPercent != nil || row.HardHitPercent != nil) || group == "pitching" && row.GroundBallPercent != nil
-		if needsBBE && row.BattedBallEvents <= 0 {
+		if needsBBE && denominator <= 0 {
 			if group == "batting" {
 				row.ExitVeloAverage, row.BarrelPercent, row.HardHitPercent = nil, nil, nil
 			} else {
@@ -239,6 +247,17 @@ func ParseSavantCSV(payload []byte, season int64, group string) ([]SavantRow, er
 		return nil, invalid(operation, "CSV contains no player rows")
 	}
 	return rows, nil
+}
+
+// firstNumber returns the first present value so a pitcher without a
+// four-seamer reports the sinker, then the cutter, as fastball velocity.
+func firstNumber(values ...*float64) *float64 {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 func savantColumn(index map[string]int, names ...string) (int, bool) {

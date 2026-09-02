@@ -65,8 +65,28 @@ func TestFantasyDisplayFixesForPositionsOwnerAndInjuredPool(t *testing.T) {
 	players[1].Owner = nil
 	players[1].Status = "IL15"
 	injured := RenderFantasyPlayers("PITCHERS", players[1:], terminal.Color)
-	if !strings.Contains(injured, "\x1b[38;5;100m") {
-		t.Fatalf("injured pool row is not yellow: %q", injured)
+	if !strings.Contains(injured, "\x1b[38;5;100m") || strings.Contains(injured, "\x1b[38;5;245m") {
+		t.Fatalf("injured pool row is not wholly yellow: %q", injured)
+	}
+}
+
+func TestPoolRowsMuteNonCategoryStatsAndKeepCategoriesPlain(t *testing.T) {
+	players := sampleFantasyPlayers()
+	hitters := RenderFantasyPlayers("HITTERS", players[:1], terminal.Color)
+	if !strings.Contains(hitters, "\x1b[38;5;245m  .360      —       —       —       —       —      —    100   .350      —\x1b[0m   20    5    18     3   .280  ") {
+		t.Fatalf("hitter pool did not mute the profile block or muted the categories: %q", hitters)
+	}
+	pitchers := RenderFantasyPlayers("PITCHERS", players[1:], terminal.Color)
+	if !strings.Contains(pitchers, "\x1b[38;5;245m 96.5       —       —       —       —       —   60.0     6\x1b[0m    5    0    70   3.20   1.10  ") {
+		t.Fatalf("pitcher pool did not mute the workload block or muted the categories: %q", pitchers)
+	}
+	full := 100.0
+	players[0].HittingAdvanced[2], players[1].PitchingAdvanced[3] = &full, &full
+	hitterLines := strings.Split(RenderFantasyPlayers("HITTERS", players[:1], terminal.Plain), "\n")
+	pitcherLines := strings.Split(RenderFantasyPlayers("PITCHERS", players[1:], terminal.Plain), "\n")
+	statsWidth := func(line, marker string) int { return terminal.VisibleWidth(strings.Split(line, marker)[0]) }
+	if !strings.Contains(hitterLines[1], "  100.0%  ") || !strings.Contains(pitcherLines[1], "  100.0%  ") || statsWidth(hitterLines[0], "  OWNER") != statsWidth(hitterLines[1], "  Operators") || statsWidth(pitcherLines[0], "  OWNER") != statsWidth(pitcherLines[1], "  Operators") {
+		t.Fatalf("a full percentage broke the column widths:\n%s\n%s\n%s\n%s", hitterLines[0], hitterLines[1], pitcherLines[0], pitcherLines[1])
 	}
 }
 

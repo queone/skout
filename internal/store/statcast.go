@@ -60,7 +60,7 @@ func (store *Store) replaceStatcastSnapshot(season int64, group string, rows []S
 			return operationError("clear Statcast snapshot", store.path, err)
 		}
 		for _, row := range rows {
-			playerID, resolveErr := statcastPlayerID(ctx, executor, row.MLBAMID)
+			playerID, resolveErr := statcastPlayerID(ctx, executor, row.MLBAMID, group)
 			if resolveErr != nil {
 				return operationError("resolve Statcast player identity", store.path, resolveErr)
 			}
@@ -89,10 +89,17 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 	return written, nil
 }
 
-func statcastPlayerID(ctx context.Context, executor sqlExecutor, mlbamID int64) (int64, error) {
+// statcastPlayerID resolves one Statcast row to the player identity the pool
+// joins read for that stat group: a pitcher-typed row for pitching, a
+// hitter-typed row for batting, then the shared Yahoo-first tie-breakers.
+func statcastPlayerID(ctx context.Context, executor sqlExecutor, mlbamID int64, group string) (int64, error) {
+	roleTypes := []any{"H", "B"}
+	if group == "pitching" {
+		roleTypes = []any{"P", "P"}
+	}
 	var playerID int64
 	err := executor.QueryRowContext(ctx, `SELECT id FROM players WHERE mlbam_id=?
-ORDER BY CASE WHEN mlbam_match_source='seed' THEN 0 ELSE 1 END DESC,yahoo_player_id IS NULL,id LIMIT 1`, mlbamID).Scan(&playerID)
+ORDER BY CASE WHEN position_type IN (?,?) THEN 0 ELSE 1 END,CASE WHEN mlbam_match_source='seed' THEN 0 ELSE 1 END DESC,yahoo_player_id IS NULL,id LIMIT 1`, mlbamID, roleTypes[0], roleTypes[1]).Scan(&playerID)
 	if err == sql.ErrNoRows {
 		return 0, nil
 	}

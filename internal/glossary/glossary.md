@@ -395,7 +395,7 @@ League-level constant that aligns FIP to the league ERA scale. skout retains FIP
 
 ### Fastball Velocity (`fastball_velo`) [stat]
 
-Average velocity of a pitcher's fastball in miles per hour. A raw stuff indicator — harder throwers generate more swings and misses. EB-blended in PQS computation (pitcher signal, 0.15 weight).
+Average velocity of a pitcher's fastball in miles per hour. Uses the four-seam average, falling back to the sinker and then the cutter average for pitchers who throw no four-seamer. A raw stuff indicator — harder throwers generate more swings and misses. EB-blended in PQS computation (pitcher signal, 0.15 weight).
 
 - **Aliases:** FastballV, Fastball Velo
 

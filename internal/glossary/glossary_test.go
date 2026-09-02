@@ -13,7 +13,7 @@ import (
 const (
 	expectedKeySetSHA256     = "18b014b5c062db5409cbc2b223706c99a7739dab0d0b78129e1154bdd85a1a9f"
 	expectedChecklistSHA256  = "de7f567663f919ae37d146067a3d002d5f3ea4de992bda81af6629782efb8d24"
-	expectedFullOutputSHA256 = "d1ca06f25a22f4bf40d1d0c23e3f04d9b5404502dc620e109bc26799af9b4f08"
+	expectedFullOutputSHA256 = "6543aa9454e7d6970dea155535c0bd4a0f2d037ff40f539508c1fbb33fff120b"
 )
 
 func TestEmbeddedGlossaryPreservesFrozenSemanticData(t *testing.T) {

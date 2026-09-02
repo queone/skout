@@ -60,10 +60,10 @@ func RenderFantasyPlayers(title string, players []domain.StoredFantasyPlayer, mo
 
 func fantasyPlayerHeader(roster bool, role string) string {
 	if !roster && role == "HITTER" {
-		return fmt.Sprintf("%-26s  %-5s  %-8s  %-1s  %4s  %4s  %6s  %5s  %5s  %5s  %5s  %5s  %5s  %5s  %5s  %5s  %3s  %3s  %4s  %4s  %5s  OWNER", role, "POS", "STATUS", "B", "YR", "ECR", "xwOBA", "EV", "BRL%", "HH%", "K%", "BB%", "SPD", "PA", "OBP", "OPS", "R", "HR", "RBI", "SB", "AVG")
+		return fmt.Sprintf("%-26s  %-5s  %-8s  %-1s  %4s  %4s  %6s  %5s  %6s  %6s  %6s  %6s  %5s  %5s  %5s  %5s  %3s  %3s  %4s  %4s  %5s  OWNER", role, "POS", "STATUS", "B", "YR", "ECR", "xwOBA", "EV", "BRL%", "HH%", "K%", "BB%", "SPD", "PA", "OBP", "OPS", "R", "HR", "RBI", "SB", "AVG")
 	}
 	if !roster {
-		return fmt.Sprintf("%-26s  %-5s  %-8s  %-1s  %4s  %4s  %5s  %6s  %5s  %5s  %5s  %5s  %5s  %4s  %3s  %3s  %4s  %5s  %5s  OWNER", role, "POS", "STATUS", "T", "YR", "ECR", "FBV", "WHIFF%", "CH%", "GB%", "K%", "BB%", "IP", "QS", "W", "SV", "K", "ERA", "WHIP")
+		return fmt.Sprintf("%-26s  %-5s  %-8s  %-1s  %4s  %4s  %5s  %6s  %6s  %6s  %6s  %6s  %5s  %4s  %3s  %3s  %4s  %5s  %5s  OWNER", role, "POS", "STATUS", "T", "YR", "ECR", "FBV", "WHIFF%", "CH%", "GB%", "K%", "BB%", "IP", "QS", "W", "SV", "K", "ERA", "WHIP")
 	}
 	if role == "HITTER" {
 		return fmt.Sprintf("SLOT  %-26s  %-5s  %-17s  %-1s  %4s  %6s  %5s  %3s  %3s  %4s  %5s  %5s", role, "POS", "STATUS", "B", "YR", "PA", "OBP", "R", "HR", "RBI", "SB", "AVG")
@@ -141,16 +141,26 @@ func fantasyPoolRow(player domain.StoredFantasyPlayer, mode terminal.ColorMode) 
 	}
 	identity := fantasyFit(strings.TrimSpace(player.Name+" "+player.Team), fantasyPlayerWidth)
 	ownerCell := fantasyOwnerCell(owner, mode)
+	injured := strings.HasPrefix(player.Status, "IL")
+	// context mutes every non-category stat; an injured row stays unstyled here
+	// so the whole-row warning color covers every cell.
+	context := func(value string) string {
+		if injured {
+			return value
+		}
+		return terminal.Dim(value, mode)
+	}
 	var row string
 	if player.Role == "P" {
-		advanced := []string{fantasyOptional(player.PitchingAdvanced[0], 5, 1, false), fantasyOptional(player.PitchingAdvanced[1], 6, 1, true), fantasyOptional(player.PitchingAdvanced[2], 5, 1, true), fantasyOptional(player.PitchingAdvanced[3], 5, 1, true), fantasyOptional(player.PitchingAdvanced[4], 5, 1, true), fantasyOptional(player.PitchingAdvanced[5], 5, 1, true)}
-		row = fmt.Sprintf("%s  %s  %s  %s  %4s  %4s  %s  %5.1f  %4.0f  %3.0f  %3.0f  %4.0f  %5.2f  %5.2f  %s", identity, FantasyPositions(player.Positions, player.IsCloser), status, hand, rank, ecr, strings.Join(advanced, "  "), player.Pitching[0], player.Pitching[1], player.Pitching[2], player.Pitching[3], player.Pitching[4], player.Pitching[5], player.Pitching[6], ownerCell)
+		advanced := []string{fantasyOptional(player.PitchingAdvanced[0], 5, 1, false), fantasyOptional(player.PitchingAdvanced[1], 6, 1, true), fantasyOptional(player.PitchingAdvanced[2], 6, 1, true), fantasyOptional(player.PitchingAdvanced[3], 6, 1, true), fantasyOptional(player.PitchingAdvanced[4], 6, 1, true), fantasyOptional(player.PitchingAdvanced[5], 6, 1, true)}
+		workload := fmt.Sprintf("%s  %5.1f  %4.0f", strings.Join(advanced, "  "), player.Pitching[0], player.Pitching[1])
+		row = fmt.Sprintf("%s  %s  %s  %s  %4s  %4s  %s  %3.0f  %3.0f  %4.0f  %5.2f  %5.2f  %s", identity, FantasyPositions(player.Positions, player.IsCloser), status, hand, rank, ecr, context(workload), player.Pitching[2], player.Pitching[3], player.Pitching[4], player.Pitching[5], player.Pitching[6], ownerCell)
 	} else {
-		advanced := []string{fantasyOptional(player.HittingAdvanced[0], 6, 3, false), fantasyOptional(player.HittingAdvanced[1], 5, 1, false), fantasyOptional(player.HittingAdvanced[2], 5, 1, true), fantasyOptional(player.HittingAdvanced[3], 5, 1, true), fantasyOptional(player.HittingAdvanced[4], 5, 1, true), fantasyOptional(player.HittingAdvanced[5], 5, 1, true), fantasyOptional(player.HittingAdvanced[6], 5, 1, false)}
-		ops := fantasyOptional(player.HittingAdvanced[7], 5, 3, false)
-		row = fmt.Sprintf("%s  %s  %s  %s  %4s  %4s  %s  %5.0f  %5s  %5s  %3.0f  %3.0f  %4.0f  %4.0f  %5s  %s", identity, FantasyPositions(player.Positions, player.IsCloser), status, hand, rank, ecr, strings.Join(advanced, "  "), player.Batting[0], fantasyRate(player.Batting[1], 3), ops, player.Batting[2], player.Batting[3], player.Batting[4], player.Batting[5], fantasyRate(player.Batting[6], 3), ownerCell)
+		advanced := []string{fantasyOptional(player.HittingAdvanced[0], 6, 3, false), fantasyOptional(player.HittingAdvanced[1], 5, 1, false), fantasyOptional(player.HittingAdvanced[2], 6, 1, true), fantasyOptional(player.HittingAdvanced[3], 6, 1, true), fantasyOptional(player.HittingAdvanced[4], 6, 1, true), fantasyOptional(player.HittingAdvanced[5], 6, 1, true), fantasyOptional(player.HittingAdvanced[6], 5, 1, false)}
+		profile := fmt.Sprintf("%s  %5.0f  %5s  %5s", strings.Join(advanced, "  "), player.Batting[0], fantasyRate(player.Batting[1], 3), fantasyOptional(player.HittingAdvanced[7], 5, 3, false))
+		row = fmt.Sprintf("%s  %s  %s  %s  %4s  %4s  %s  %3.0f  %3.0f  %4.0f  %4.0f  %5s  %s", identity, FantasyPositions(player.Positions, player.IsCloser), status, hand, rank, ecr, context(profile), player.Batting[2], player.Batting[3], player.Batting[4], player.Batting[5], fantasyRate(player.Batting[6], 3), ownerCell)
 	}
-	if strings.HasPrefix(player.Status, "IL") {
+	if injured {
 		return terminal.Warning(row, mode)
 	}
 	return row
