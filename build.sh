@@ -222,6 +222,14 @@ only against those cmd packages. To validate the full repo, run with no targets.
 
 _failure() { printf '%s\n' "$1" >&2; }
 
+_tmp_root() { # print ${TMPDIR:-/tmp} without trailing slashes; empty when TMPDIR=/
+  local root="${TMPDIR:-/tmp}"
+  while [ "${root%/}" != "$root" ]; do
+    root="${root%/}"
+  done
+  printf '%s\n' "$root"
+}
+
 _cleanup_build_owned() {
   local cleanup_failed=0 path
   for path in "${_build_install_temps[@]+"${_build_install_temps[@]}"}"; do
@@ -334,7 +342,7 @@ EOF
   fi
 
   _build_install_temps=()
-  _build_owned_dir=$(mktemp -d "${TMPDIR:-/tmp}/govna-go-build.XXXXXX") || {
+  _build_owned_dir=$(mktemp -d "$(_tmp_root)/govna-go-build.XXXXXX") || {
     printf 'build: create owned temporary directory failed\n' >&2
     return 1
   }
@@ -482,6 +490,7 @@ EOF
     compiled_path="$_build_owned_dir/$target$ext"
     output_path="$bin_dir/$target$ext"
     _install_validated_utility "$compiled_path" "$output_path" "$target" || return 1
+    printf '    installed: %s\n' "$(cya4 "$output_path")"
   done
 
   local next_tag
@@ -566,7 +575,7 @@ _is_strict_stable_semver() { # $1=version -> success when MAJOR.MINOR.PATCH
 
 _validate_utility_version_output() { # $1=binary $2=utility ID $3=declared version
   local binary="$1" utility_id="$2" declared="$3" probe_root probe_dir rc actual
-  probe_root="${_build_owned_dir:-${TMPDIR:-/tmp}}"
+  probe_root="${_build_owned_dir:-$(_tmp_root)}"
   probe_dir=$(mktemp -d "$probe_root/govna-version.XXXXXX") || {
     printf 'utility %s: create version probe workspace: check temporary-directory permissions and retry\n' "$utility_id" >&2
     return 1
@@ -614,7 +623,6 @@ _install_validated_utility() { # $1=compiled $2=destination $3=utility ID
   chmod 0755 "$install_tmp" || { rm -f "$install_tmp"; return 1; }
   mv -f "$install_tmp" "$output" || { rm -f "$install_tmp"; return 1; }
   _build_install_temps[$temp_index]=''
-  printf '    installed: %s\n' "$(cya4 "$output")"
 }
 
 _ensure_staticcheck() { # $1=bin_dir $2=ext -> sets _staticcheck_path; stdout msgs
@@ -806,7 +814,7 @@ rel_usage() {
 rel_run() {
   local tag="$1" message="$2" rc=0 cleanup_rc=0
   _build_install_temps=()
-  _build_owned_dir=$(mktemp -d "${TMPDIR:-/tmp}/govna-go-release.XXXXXX") || {
+  _build_owned_dir=$(mktemp -d "$(_tmp_root)/govna-go-release.XXXXXX") || {
     _failure 'release: create invocation-owned temporary directory failed'
     return 1
   }
@@ -1025,6 +1033,14 @@ _validate_binary_provenance() { # $1=binary $2=revision $3=label
   }
 }
 
+_utility_count_label() { # $1=count -> "1 utility" or "<N> utilities"
+  if [ "$1" -eq 1 ]; then
+    printf '%s\n' '1 utility'
+  else
+    printf '%s utilities\n' "$1"
+  fi
+}
+
 _release_compile_validate_install() { # $1=tag
   local tag="$1" release_version="${1#v}" revision bin_dir ext d target version decls compiled output
   local targets=() versions=()
@@ -1092,9 +1108,9 @@ EOF
     compiled="$_build_owned_dir/$target$ext"
     _validate_utility_version_output "$compiled" "$target" "$version" || return 1
     _validate_binary_provenance "$compiled" "$revision" "compiled $target" || return 1
-    printf '    verified: %s\n' "$(cya4 "$target")"
     i=$((i + 1))
   done
+  printf '    verified: %s\n' "$(cya4 "$(_utility_count_label "${#targets[@]}")")"
 
   mkdir -p "$bin_dir" || {
     _failure "release: create install directory failed: $bin_dir"
@@ -1106,6 +1122,7 @@ EOF
     output="$bin_dir/$target$ext"
     _install_validated_utility "$compiled" "$output" "$target" || return 1
   done
+  printf '    installed: %s to %s\n' "$(cya4 "$(_utility_count_label "${#targets[@]}")")" "$(cya4 "$bin_dir")"
 
   printf '\n%s\n' "$(yel7 '==> Recheck installed release utilities')"
   i=0
@@ -1114,9 +1131,9 @@ EOF
     output="$bin_dir/$target$ext"
     _validate_utility_version_output "$output" "$target" "$version" || return 1
     _validate_binary_provenance "$output" "$revision" "installed $target" || return 1
-    printf '    verified installed: %s\n' "$(cya4 "$output")"
     i=$((i + 1))
   done
+  printf '    verified installed: %s\n' "$(cya4 "$(_utility_count_label "${#targets[@]}")")"
 }
 
 # _rel_step NAME COMPLETED gitargs... — run one git step; on failure emit the
@@ -1214,7 +1231,7 @@ EOF
 # prep_run DRY VERSION MESSAGE.
 prep_run() {
   local dry="$1" version="$2" message="$3" rc=0 cleanup_rc=0
-  _prep_owned_dir=$(mktemp -d "${TMPDIR:-/tmp}/govna-go-prep.XXXXXX") || {
+  _prep_owned_dir=$(mktemp -d "$(_tmp_root)/govna-go-prep.XXXXXX") || {
     printf 'prep: create invocation-owned temporary directory failed\n' >&2
     return 1
   }
@@ -1696,7 +1713,7 @@ _prep_remove_ie_lines() { # $1=root $2=ielines(newline-sep)
   local root="$1" lines="$2"
   [ -n "$lines" ] || return 0
   local tmp
-  tmp=$(mktemp "${TMPDIR:-/tmp}/prep-plan.XXXXXX")
+  tmp=$(mktemp "$(_tmp_root)/prep-plan.XXXXXX")
   _prep_ie_err=''
   drop="$lines" awk '
     BEGIN { n = split(ENVIRON["drop"], arr, "\n"); for (i = 1; i <= n; i++) if (arr[i] != "") d[arr[i]] = 1 }
@@ -1828,7 +1845,7 @@ $acfiles
 EOF
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    if [ -f "$root/plan.md" ] && grep -Fqx "$line" "$root/plan.md"; then
+    if [ -f "$root/plan.md" ] && grep -Fqx -- "$line" "$root/plan.md"; then
       printf 'prep: planned plan.md pointer remains: %s\n' "$(_trim "$line")" >&2
       return 1
     fi
@@ -1854,7 +1871,7 @@ _prep_apply_version_bump() { # $1=path $2=kind $3=vstripped
     return 1
   fi
   local tmp
-  tmp=$(mktemp "${TMPDIR:-/tmp}/prep-bump.XXXXXX")
+  tmp=$(mktemp "$(_tmp_root)/prep-bump.XXXXXX")
   if ! sed -E "s/$pat/\\1\"$v\"/g" "$path" >"$tmp"; then
     rm -f "$tmp"; _prep_bump_err="sed failed on $path"; return 1
   fi
@@ -1866,7 +1883,7 @@ _prep_apply_changelog_insert() { # $1=path $2=vstripped $3=message
   local path="$1" v="$2" msg="$3"
   _validate_changelog_shape "$path" || return 1
   local tmp row
-  tmp=$(mktemp "${TMPDIR:-/tmp}/prep-cl.XXXXXX")
+  tmp=$(mktemp "$(_tmp_root)/prep-cl.XXXXXX")
   row="| $v | $msg |"
   if ! row="$row" awk '
     BEGIN { row = ENVIRON["row"] }
