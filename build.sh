@@ -480,6 +480,7 @@ EOF
   for target in "${install_targets[@]+"${install_targets[@]}"}"; do
     compiled_path="$_build_owned_dir/$target$ext"
     _validate_utility_version_output "$compiled_path" "$target" "${install_versions[$index]}" || return 1
+    _validate_utility_help_output "$compiled_path" "$target" "${install_versions[$index]}" || return 1
     index=$((index + 1))
   done
 
@@ -605,6 +606,137 @@ _validate_utility_version_output() { # $1=binary $2=utility ID $3=declared versi
     return 1
   fi
   rm -rf "$probe_dir"
+}
+
+_module_path() { # -> go.mod module path without a trailing major-version segment, or empty
+  local line
+  [ -f go.mod ] || { printf ''; return; }
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+    module\ * | module"$(printf '\t')"*)
+      line=$(_trim "${line#module}")
+      case "$line" in
+      */v[1-9] | */v[1-9][0-9] | */v[1-9][0-9][0-9]) line=${line%/*} ;;
+      esac
+      printf '%s' "$line"
+      return
+      ;;
+    esac
+  done <go.mod
+  printf ''
+}
+
+_help_probe_fail() { # $1=utility ID $2=message $3=probe dir
+  printf 'utility %s: %s\n' "$1" "$2" >&2
+  rm -rf "$3"
+}
+
+_validate_utility_help_output() { # $1=binary $2=utility ID $3=declared version
+  local binary="$1" utility_id="$2" declared="$3" probe_root probe_dir rc i flag line rank last custom seen_options readme module_path
+  module_path=$(_module_path)
+  if [ -z "$module_path" ]; then
+    printf 'utility %s: help probe needs the module line in go.mod\n' "$utility_id" >&2
+    return 1
+  fi
+  probe_root="${_build_owned_dir:-$(_tmp_root)}"
+  probe_dir=$(mktemp -d "$probe_root/govna-help.XXXXXX") || {
+    printf 'utility %s: create help probe workspace: check temporary-directory permissions and retry\n' "$utility_id" >&2
+    return 1
+  }
+  i=0
+  for flag in -h '-?' --help; do
+    i=$((i + 1))
+    rc=0
+    "$binary" "$flag" >"$probe_dir/out$i" 2>"$probe_dir/err$i" </dev/null || rc=$?
+    if [ "$rc" -ne 0 ] || [ -s "$probe_dir/err$i" ]; then
+      _help_probe_fail "$utility_id" "$flag exited $rc or wrote to stderr; print the help on stdout and exit 0" "$probe_dir"
+      return 1
+    fi
+  done
+  if ! cmp -s "$probe_dir/out1" "$probe_dir/out2" || ! cmp -s "$probe_dir/out1" "$probe_dir/out3"; then
+    _help_probe_fail "$utility_id" "-h, -?, and --help print different help" "$probe_dir"
+    return 1
+  fi
+  if LC_ALL=C grep -q "$(printf '\033')" "$probe_dir/out1"; then
+    _help_probe_fail "$utility_id" "help carries an escape sequence without a terminal" "$probe_dir"
+    return 1
+  fi
+  if [ "$(sed -n '1p' "$probe_dir/out1")" != "$utility_id v$declared" ]; then
+    _help_probe_fail "$utility_id" "help line 1 must be exactly '$utility_id v$declared'" "$probe_dir"
+    return 1
+  fi
+  line=$(sed -n '2p' "$probe_dir/out1")
+  case "$line" in
+    '' | *.)
+      _help_probe_fail "$utility_id" "help line 2 must be a one-line description with no trailing period" "$probe_dir"
+      return 1
+      ;;
+  esac
+  line=$(sed -n '3p' "$probe_dir/out1")
+  case "$line" in
+    "$module_path" | "$module_path"/*) ;;
+    *)
+      _help_probe_fail "$utility_id" "help line 3 must be the utility's URL without a scheme: $module_path or $module_path/<path>" "$probe_dir"
+      return 1
+      ;;
+  esac
+  case "$line" in
+    *://* | *' '*)
+      _help_probe_fail "$utility_id" "help line 3 must carry the URL alone with no scheme" "$probe_dir"
+      return 1
+      ;;
+  esac
+  if [ -n "$(sed -n '4p' "$probe_dir/out1")" ] || [ "$(sed -n '5p' "$probe_dir/out1")" != "Usage" ]; then
+    _help_probe_fail "$utility_id" "help line 4 must be blank and line 5 must be Usage" "$probe_dir"
+    return 1
+  fi
+  last=0
+  custom=0
+  seen_options=0
+  while IFS= read -r line; do
+    case "$line" in
+      '' | ' '*) continue ;;
+      Commands) rank=1 ;;
+      Options) rank=2; seen_options=1 ;;
+      Examples) rank=4 ;;
+      Usage | Overview | Notes)
+        _help_probe_fail "$utility_id" "heading $line: Usage appears once; Overview and Notes belong in the README" "$probe_dir"
+        return 1
+        ;;
+      *)
+        if printf '%s\n' "$line" | LC_ALL=C grep -Eq '^[A-Z][a-z]+$'; then
+          rank=3
+          custom=$((custom + 1))
+          if [ "$custom" -gt 1 ]; then
+            _help_probe_fail "$utility_id" "second utility-specific section $line; at most one is allowed" "$probe_dir"
+            return 1
+          fi
+        else
+          _help_probe_fail "$utility_id" "help text outside a section: $line" "$probe_dir"
+          return 1
+        fi
+        ;;
+    esac
+    if [ "$rank" -le "$last" ]; then
+      _help_probe_fail "$utility_id" "section $line is out of order; the order is Usage, Commands, Options, one other, Examples" "$probe_dir"
+      return 1
+    fi
+    last=$rank
+  done < <(sed -n '6,$p' "$probe_dir/out1")
+  if [ "$seen_options" -ne 1 ]; then
+    _help_probe_fail "$utility_id" "help has no Options section" "$probe_dir"
+    return 1
+  fi
+  readme="cmd/$utility_id/README.md"
+  if [ -f "$readme" ]; then
+    awk '/^### Usage$/{f=1;next} f==1&&/^```text$/{f=2;next} f==2&&/^```$/{exit} f==2{print}' "$readme" >"$probe_dir/readme"
+    if ! cmp -s "$probe_dir/readme" "$probe_dir/out1"; then
+      _help_probe_fail "$utility_id" "$readme '### Usage' text block differs from the help; paste the plain help output there" "$probe_dir"
+      return 1
+    fi
+  fi
+  rm -rf "$probe_dir"
+  return 0
 }
 
 _install_validated_utility() { # $1=compiled $2=destination $3=utility ID
@@ -1107,6 +1239,7 @@ EOF
     version="${versions[$i]}"
     compiled="$_build_owned_dir/$target$ext"
     _validate_utility_version_output "$compiled" "$target" "$version" || return 1
+    _validate_utility_help_output "$compiled" "$target" "$version" || return 1
     _validate_binary_provenance "$compiled" "$revision" "compiled $target" || return 1
     i=$((i + 1))
   done
@@ -1130,6 +1263,7 @@ EOF
     version="${versions[$i]}"
     output="$bin_dir/$target$ext"
     _validate_utility_version_output "$output" "$target" "$version" || return 1
+    _validate_utility_help_output "$output" "$target" "$version" || return 1
     _validate_binary_provenance "$output" "$revision" "installed $target" || return 1
     i=$((i + 1))
   done
@@ -1670,10 +1804,6 @@ _prep_find_ac_files() { # $1=root $2=acnums -> sorted govna/ac<N>-*.md paths
 
 _prep_validate_ac_selection() { # $1=root $2=acnums $3=acfiles
   local root="$1" acnums="$2" acfiles="$3" number count path name
-  if [ -z "$acnums" ]; then
-    printf 'prep: release message must name at least one AC<number> reference\n' >&2
-    return 1
-  fi
   while IFS= read -r number; do
     [ -n "$number" ] || continue
     count=0

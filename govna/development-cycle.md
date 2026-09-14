@@ -15,7 +15,7 @@ The lifecycle makes recurring programming checkpoints and their settled context 
 - Treat standalone `Ratify` or `ratify` as the Director acceptance action.
 - Initiate the final review on that action.
 - Complete Ratify when that review is clean.
-- Treat standalone `Package`, `package`, `pack`, and `prep` as equivalent post-Ratify release-preparation actions.
+- Treat standalone `Package`, `package`, `pack`, and `prep` as equivalent release-preparation actions for a Ratified or empty release batch.
 - Do not infer Package from Ratify acceptance.
 - Start an AC cycle only after the Director identifies the AC and authorizes Audit, integrated audit adoption identifies the emitted AC, or a completed Draft identifies the active AC.
 - Apply an unnumbered Audit, Refine, Implement, or Ratify instruction when exactly one AC can enter the requested phase.
@@ -23,6 +23,7 @@ The lifecycle makes recurring programming checkpoints and their settled context 
 - Ask the Director for the AC number and last completed lifecycle action when phase eligibility cannot be established.
 - Define the pending release batch as every unpackaged AC whose implementation is present in the unreleased repository state.
 - Include an implemented AC in the pending release batch while it awaits Ratify.
+- Define an empty release batch as an empty pending release batch with at least one unreleased direct-handled change.
 - Measure the projected complete pending release batch with one private provisional prefix-plus-summary string before another AC enters Implement.
 - Use the provisional string only for the 80-byte fit check.
 - Discard the provisional string after the fit check.
@@ -33,6 +34,7 @@ The lifecycle makes recurring programming checkpoints and their settled context 
 - Treat only a Director-named complete pending release batch as an established multi-AC release batch.
 - Accept only `Package` followed by a plus-joined list of uppercase `AC<number>` references as the named-batch Package form.
 - Apply standalone `Package`, `package`, `pack`, or `prep` to the established Ratified release batch.
+- Apply standalone `Package`, `package`, `pack`, or `prep` to an established empty release batch when no AC can enter Package.
 - Ask the Director to name the release batch when multiple ungrouped Ratified ACs can enter Package.
 - Reject a named release batch that contains a non-Ratified AC.
 - Recheck the complete pending release batch and exact release message before Package runs prep.
@@ -73,7 +75,7 @@ The lifecycle makes recurring programming checkpoints and their settled context 
    - Reuse the Implement evidence snapshot when `AGENTS.md` defines it as current.
    - Revalidate affected evidence when `AGENTS.md` defines it as missing or stale.
    - Apply bounded correction behavior.
-6. **Package.** Run `govna/build-release.md` release preparation for the established Ratified release batch only after separate Director authorization.
+6. **Package.** Run `govna/build-release.md` release preparation for the established Ratified or empty release batch only after separate Director authorization.
 
 ### Implement Evidence Snapshot
 
@@ -91,7 +93,7 @@ The lifecycle makes recurring programming checkpoints and their settled context 
 
 Apply the complete phase, scope, correction, contract-integrity, and advancement rules in `AGENTS.md` throughout this cycle.
 
-The `govna` executable ends after deterministic audit comparison and emission. The Operator performs the integrated Audit, Refine, and Pre-Implementation Verification steps. A required change to an immutable emitted AC needs a new audit emission. The pre-Implement fit check uses one private provisional string only to prevent an oversized pending batch. Package requires every implemented batch member to be Ratified, compares the complete pending batch with the exact message, and rejects partial or oversized batches before prep.
+The `govna` executable ends after deterministic audit comparison and emission. The Operator performs the integrated Audit, Refine, and Pre-Implementation Verification steps. A required change to an immutable emitted AC needs a new audit emission. The pre-Implement fit check uses one private provisional string only to prevent an oversized pending batch. Package requires every implemented batch member to be Ratified, compares the complete pending batch with the exact message, and rejects partial or oversized batches before prep. An empty release batch packages direct-handled changes without AC references only when no implemented AC awaits release.
 
 During Director-authorized Implement, a bounded completeness correction fixes a missed path or instruction when the active AC already settles the required result. The Operator may complete at most three correction rounds within the existing artifact family. Each round updates the AC in Refine, reruns the final AC wording and scope check called Pre-Implementation Verification, and returns to Implement. A Director-owned decision or fourth round pauses for the Director.
 

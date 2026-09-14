@@ -30,6 +30,10 @@
 - Reject unknown, duplicate, and path-containing scoped targets.
 - Compile each selected utility once in an invocation-owned external temporary directory.
 - Validate every selected compiled `--version` output before installing any selected utility.
+- Validate every selected compiled utility's help output against `## CLI Usage Formatting` before installing any selected utility.
+- Require `-h`, `-?`, and `--help` to print identical help on stdout with exit 0 and no escape sequence.
+- Require help line three to be the `go.mod` module path, optionally followed by `/` plus a sub-path.
+- Require a utility README at `cmd/<name>/README.md`, when present, to carry a `### Usage` text block byte-equal to the help.
 - Replace each installed utility atomically from an adjacent staging file.
 - Preserve each installed utility until its replacement succeeds.
 - Use the successful final full build and clean Ratify review as current Package evidence.
@@ -66,10 +70,12 @@
 - Compile each discovered utility once in byte order with `go build -mod=readonly -buildvcs=true -o <temporary-output> -ldflags '-s -w' ./cmd/<target>`.
 - Run no canonical validation phase during release compilation.
 - Validate every compiled utility version and committed-HEAD provenance before installation.
+- Validate every compiled utility's help output before installation during release compilation.
 - Require every prep-changed utility version to equal the unprefixed release tag.
 - Preserve independent secondary utility versions during release compilation.
 - Install every validated utility by atomic adjacent replacement.
 - Recheck every installed utility version and committed-HEAD provenance before tagging.
+- Recheck every installed utility's help output before tagging.
 - Create the release tag only after compilation, validation, installation, and rechecks pass.
 - Push nothing after an earlier release failure.
 - Remove invocation-owned release outputs on every handled exit.

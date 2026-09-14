@@ -60,20 +60,20 @@ type commandSpec struct {
 var globalFlags = []flagSpec{{"-l", "--league", "KEY", "Yahoo league key", false}, {"-d", "--debug", "", "Print operation diagnostics", false}}
 
 var commands = []commandSpec{
-	{name: "fetch", label: "fetch <host> <path>", description: "Fetch a raw provider path for debugging", positional: "HOST PATH", minimum: 2, maximum: 2},
+	{name: "fetch", label: "fetch <HOST> <PATH>", description: "Fetch a raw provider path for debugging", positional: "HOST PATH", minimum: 2, maximum: 2},
 	{name: "st", label: "st", description: "Show status"},
 	{name: "sync", label: "sync", description: "Synchronize the selected league", flags: []flagSpec{{"-T", "--team", "TEAM", "Select the primary fantasy team", false}}},
 	{name: "reset", label: "reset", description: "Delete the local skout database"},
-	{name: "m", label: "m [team]", description: "Show a daily or weekly matchup", positional: "NAME", maximum: 1, flags: []flagSpec{{"-w", "--week", "WEEK", "Show a specific matchup week", false}, {"-W", "--weekly", "", "Show weekly running totals", false}, {"-D", "--day", "MMM-DD", "Show stats for a specific day", false}, seasonFlag()}},
+	{name: "m", label: "m [TEAM]", description: "Show a daily or weekly matchup", positional: "NAME", maximum: 1, flags: []flagSpec{{"-w", "--week", "WEEK", "Show a specific matchup week", false}, {"-W", "--weekly", "", "Show weekly running totals", false}, {"-D", "--day", "MMM-DD", "Show stats for a specific day", false}, seasonFlag()}},
 	{name: "mm", label: "mm", description: "Show every league matchup for the week", flags: []flagSpec{{"-w", "--week", "WEEK", "Show a specific matchup week", false}, seasonFlag()}},
-	{name: "t", label: "t [team]", description: "Show MLB 40-man rosters", positional: "TEAM", maximum: 1, flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
+	{name: "t", label: "t [TEAM]", description: "Show MLB 40-man rosters", positional: "TEAM", maximum: 1, flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
 	{name: "tt", label: "tt", description: "Show MLB standings and team totals", flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
 	{name: "sp", label: "sp", description: "Show the three-day probable-pitcher slate", flags: []flagSpec{{"-f", "--force", "", "Refresh provider data", false}}},
-	{name: "r", label: "r [name]", description: "Show a fantasy roster", positional: "NAME", maximum: 1, flags: []flagSpec{seasonFlag()}},
+	{name: "r", label: "r [NAME]", description: "Show a fantasy roster", positional: "NAME", maximum: 1, flags: []flagSpec{seasonFlag()}},
 	{name: "rt", label: "rt", description: "Show fantasy roster totals", flags: []flagSpec{{"-w", "--weekly", "WEEK|DATE", "Show current or selected weekly totals", true}, seasonFlag()}},
-	{name: "h", label: "h [N|name]", description: "Browse hitters or show a player", positional: "N|NAME", maximum: 1, flags: playerFlags()},
-	{name: "p", label: "p [N|name]", description: "Browse pitchers or show a player", positional: "N|NAME", maximum: 1, flags: playerFlags()},
-	{name: "i", label: "i [term]", description: "Look up a term in the skout glossary", positional: "TERM", maximum: 1, aliases: []string{"whatis"}},
+	{name: "h", label: "h [N|NAME]", description: "Browse hitters or show a player", positional: "N|NAME", maximum: 1, flags: playerFlags()},
+	{name: "p", label: "p [N|NAME]", description: "Browse pitchers or show a player", positional: "N|NAME", maximum: 1, flags: playerFlags()},
+	{name: "i", label: "i [TERM]", description: "Look up a term in the skout glossary", positional: "TERM", maximum: 1, aliases: []string{"whatis"}},
 }
 
 func playerFlags() []flagSpec {
@@ -178,12 +178,12 @@ func ProductionHandlers(version string, context Context) Handlers {
 }
 
 type parsedInvocation struct {
-	spec                   commandSpec
-	values                 map[string]string
-	booleans               map[string]bool
-	positionals            []string
-	league                 string
-	leagueSet, debug, help bool
+	spec                            commandSpec
+	values                          map[string]string
+	booleans                        map[string]bool
+	positionals                     []string
+	league                          string
+	leagueSet, debug, help, version bool
 }
 
 // Run parses and dispatches one argument vector without exiting the process.
@@ -204,25 +204,13 @@ func Run(args []string, version string, context Context, handlers Handlers) int 
 		_, _ = io.WriteString(context.Stdout, RootHelp(version, colorMode(context)))
 		return 0
 	}
-	if len(args) == 1 {
-		switch args[0] {
-		case "-h", "-?", "--help":
-			_, _ = io.WriteString(context.Stdout, RootHelp(version, colorMode(context)))
-			return 0
-		case "-v", "--version":
-			fmt.Fprintf(context.Stdout, "skout %s\n", version)
-			return 0
-		}
-	}
-	if action := rootAction(args); action != "" {
-		switch action {
-		case "help":
-			_, _ = io.WriteString(context.Stdout, RootParserHelp(colorMode(context)))
-			return 0
-		case "version":
-			fmt.Fprintf(context.Stdout, "skout %s\n", version)
-			return 0
-		}
+	switch rootAction(args) {
+	case "help":
+		_, _ = io.WriteString(context.Stdout, RootHelp(version, colorMode(context)))
+		return 0
+	case "version":
+		fmt.Fprintf(context.Stdout, "skout v%s\n", version)
+		return 0
 	}
 	if parsed, diagnostic, handled := parseRootOnly(args); handled {
 		if diagnostic != "" {
@@ -244,7 +232,11 @@ func Run(args []string, version string, context Context, handlers Handlers) int 
 		return 2
 	}
 	if parsed.help {
-		_, _ = io.WriteString(context.Stdout, CommandHelp(parsed.spec, colorMode(context)))
+		_, _ = io.WriteString(context.Stdout, CommandHelp(parsed.spec, version, colorMode(context)))
+		return 0
+	}
+	if parsed.version {
+		fmt.Fprintf(context.Stdout, "skout v%s\n", version)
 		return 0
 	}
 	if parsed.debug {
@@ -403,7 +395,8 @@ func parse(args []string) (parsedInvocation, string) {
 				continue
 			}
 			if argument == "-v" || argument == "--version" {
-				return parsedInvocation{}, unexpected(spec, argument)
+				parsed.version = true
+				continue
 			}
 			if matched, value, handled, needNext := matchFlag(argument, append(globalFlags, spec.flags...)); handled {
 				key := strings.TrimPrefix(matched.long, "--")
@@ -443,7 +436,7 @@ func parse(args []string) (parsedInvocation, string) {
 		}
 		parsed.positionals = append(parsed.positionals, argument)
 	}
-	if parsed.help {
+	if parsed.help || parsed.version {
 		return parsed, ""
 	}
 	if len(parsed.positionals) < spec.minimum {
@@ -592,9 +585,9 @@ func rootAction(args []string) string {
 			}
 			index++
 		case "-d", "--debug":
-		case "-h", "--help":
+		case "-h", "-?", "--help", "help":
 			return "help"
-		case "-v", "--version":
+		case "-v", "--version", "version":
 			return "version"
 		default:
 			if strings.HasPrefix(argument, "--league=") || strings.HasPrefix(argument, "-l") && len(argument) > 2 {
@@ -608,99 +601,68 @@ func rootAction(args []string) string {
 
 // RootHelp renders root help from the same descriptors used by parsing.
 func RootHelp(version string, mode terminal.ColorMode) string {
-	var output strings.Builder
-	output.WriteString(terminal.Title("skout", mode))
-	output.WriteString(" v" + version + "\n")
-	output.WriteString(terminal.Subtitle("Fantasy Baseball advisor — github.com/queone/skout", mode))
-	output.WriteString("\n\n")
-	output.WriteString(terminal.Section("USAGE", mode))
-	output.WriteString("\n  skout <command> [flags]\n\n")
-	output.WriteString(terminal.Section("COMMANDS", mode))
-	output.WriteByte('\n')
+	rows := make([]helpRow, 0, 4*len(commands))
 	for _, command := range commands {
 		if command.name == "fetch" {
 			continue
 		}
-		helpRow(&output, command.label, command.description, 28)
+		rows = append(rows, helpRow{command.label, command.description})
 		for _, flag := range command.flags {
-			helpRow(&output, "  "+flagLabel(flag, false), flag.description, 28)
+			rows = append(rows, helpRow{"  " + flagLabel(flag), flag.description})
 		}
 	}
-	output.WriteByte('\n')
-	output.WriteString(terminal.Section("FLAGS", mode))
-	output.WriteByte('\n')
-	for _, flag := range []struct{ label, description string }{{"-l, --league <key>", "Yahoo league key"}, {"-d, --debug", "Print operation diagnostics"}, {"-v, --version", "Print version"}, {"-h, -?, --help", "Print this help"}} {
-		helpRow(&output, flag.label, flag.description, 28)
-	}
-	return output.String()
+	rows = append(rows, helpRow{"help", "Print this help"}, helpRow{"version", "Print version"})
+	return renderHelp(version, mode, "skout COMMAND [options]", rows, nil)
 }
 
-// RootParserHelp renders the frozen generic parser help used by compound help invocations.
-func RootParserHelp(mode terminal.ColorMode) string {
-	var output strings.Builder
-	output.WriteString("Fantasy Baseball advisor — github.com/queone/skout\n\n")
-	output.WriteString(terminal.Usage("Usage:", mode) + " skout [OPTIONS] [COMMAND]\n\nCommands:\n")
-	for _, command := range commands {
-		fmt.Fprintf(&output, "  %-6s %s\n", command.name, command.description)
+// CommandHelp renders one command's help page through the shared root renderer.
+func CommandHelp(command commandSpec, version string, mode terminal.ColorMode) string {
+	name, arguments, _ := strings.Cut(command.label, " ")
+	synopsis := "skout " + name + " [options]"
+	if arguments != "" {
+		synopsis += " " + arguments
 	}
-	output.WriteString("\nOptions:\n")
-	commandHelpRow(&output, "-l, --league <KEY>", "Yahoo league key", 19)
-	commandHelpRow(&output, "-d, --debug", "Print operation diagnostics", 19)
-	commandHelpRow(&output, "-v, --version", "Print version", 19)
-	commandHelpRow(&output, "-h, --help", "Print this help", 19)
-	return output.String()
+	return renderHelp(version, mode, synopsis, []helpRow{{command.label, command.description}}, command.flags)
 }
 
-// CommandHelp renders one command-specific help page.
-func CommandHelp(command commandSpec, mode terminal.ColorMode) string {
-	if command.name == "i" {
-		var output strings.Builder
-		output.WriteString("Look up a term in the skout glossary\n\n")
-		output.WriteString(terminal.Usage("Usage:", mode) + " skout i [OPTIONS] [TERM]\n\nArguments:\n  [TERM]\n\nOptions:\n")
-		for _, row := range [][2]string{{"-l, --league <KEY>", "Yahoo league key"}, {"-d, --debug", "Print operation diagnostics"}, {"-h, -?, --help", "Print this help"}} {
-			helpRow(&output, row[0], row[1], 34)
-		}
-		return output.String()
-	}
+type helpRow struct{ form, meaning string }
+
+// renderHelp writes the shared header followed by the Usage, Commands, and Options sections.
+func renderHelp(version string, mode terminal.ColorMode, synopsis string, commandRows []helpRow, flags []flagSpec) string {
 	var output strings.Builder
-	output.WriteString(command.description + "\n\n")
-	output.WriteString(terminal.Usage("Usage:", mode) + " " + usage(command) + "\n")
-	if command.positional != "" {
-		output.WriteString("\nArguments:\n")
-		if command.minimum > 0 {
-			for name := range strings.FieldsSeq(command.positional) {
-				output.WriteString("  <" + name + ">  \n")
-			}
-		} else {
-			output.WriteString("  [" + command.positional + "]  \n")
-		}
+	output.WriteString(terminal.Title("skout", mode) + " v" + version + "\n")
+	output.WriteString(terminal.Subtitle("Fantasy Baseball advisor", mode) + "\n")
+	output.WriteString(terminal.Link("github.com/queone/skout", mode) + "\n\n")
+	helpSection(&output, "Usage", []helpRow{{synopsis, ""}}, mode)
+	output.WriteByte('\n')
+	helpSection(&output, "Commands", commandRows, mode)
+	output.WriteByte('\n')
+	options := make([]helpRow, 0, len(flags)+len(globalFlags)+2)
+	for _, flag := range flags {
+		options = append(options, helpRow{flagLabel(flag), flag.description})
 	}
-	output.WriteString("\nOptions:\n")
-	type row struct{ label, description string }
-	rows := make([]row, 0, len(command.flags)+3)
-	for _, flag := range command.flags {
-		description := flag.description
-		if command.name == "m" || command.name == "rt" || (command.name == "h" || command.name == "p") && flag.long != "--waiver" {
-			description = ""
-		}
-		rows = append(rows, row{flagLabel(flag, true), description})
-	}
-	rows = append(rows, row{"-h, -?, --help", ""})
 	for _, flag := range globalFlags {
-		rows = append(rows, row{flagLabel(flag, true), flag.description})
+		options = append(options, helpRow{flagLabel(flag), flag.description})
 	}
-	maximum := 0
-	for _, row := range rows {
-		maximum = max(maximum, len(row.label))
-	}
-	for _, row := range rows {
-		commandHelpRow(&output, row.label, row.description, maximum)
-	}
+	options = append(options, helpRow{"-v, --version", "Print version"}, helpRow{"-h, -?, --help", "Print this help"})
+	helpSection(&output, "Options", options, mode)
 	return output.String()
 }
 
-func commandHelpRow(output *strings.Builder, label, description string, maximum int) {
-	output.WriteString("  " + label + strings.Repeat(" ", maximum-len(label)+2) + description + "\n")
+// helpSection writes one heading and its rows with every meaning aligned two spaces past the longest form.
+func helpSection(output *strings.Builder, heading string, rows []helpRow, mode terminal.ColorMode) {
+	output.WriteString(terminal.Section(heading, mode) + "\n")
+	width := 0
+	for _, row := range rows {
+		width = max(width, len(row.form))
+	}
+	for _, row := range rows {
+		if row.meaning == "" {
+			output.WriteString("  " + row.form + "\n")
+			continue
+		}
+		fmt.Fprintf(output, "  %-*s  %s\n", width, row.form, row.meaning)
+	}
 }
 
 func usage(command commandSpec) string {
@@ -717,7 +679,7 @@ func usage(command commandSpec) string {
 	}
 	return output.String()
 }
-func flagLabel(flag flagSpec, _ bool) string {
+func flagLabel(flag flagSpec) string {
 	value := flag.value
 	label := flag.short + ", " + flag.long
 	if value != "" {
@@ -728,9 +690,6 @@ func flagLabel(flag flagSpec, _ bool) string {
 		}
 	}
 	return label
-}
-func helpRow(output *strings.Builder, label, description string, column int) {
-	fmt.Fprintf(output, "  %-*s %s\n", column, label, description)
 }
 
 func runGlossary(parsed parsedInvocation, context Context) int {

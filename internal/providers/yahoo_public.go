@@ -266,9 +266,7 @@ func (client *YahooPublicClient) LeagueRosters(_ string, teamKeys []string, prog
 	results := make(chan rosterResult, workerCount)
 	var workers sync.WaitGroup
 	for range workerCount {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+		workers.Go(func() {
 			for index := range jobs {
 				teamKey := teamKeys[index]
 				payload, err := client.getJSON(yahooJoin(client.endpoints.Fantasy, "/team/"+teamKey+"/roster/players;out=ranks,percent_owned,percent_started?format=json"))
@@ -280,7 +278,7 @@ func (client *YahooPublicClient) LeagueRosters(_ string, teamKeys []string, prog
 				}
 				results <- result
 			}
-		}()
+		})
 	}
 	payloads := make([][]byte, len(teamKeys))
 	next, outstanding := 0, 0

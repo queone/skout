@@ -167,6 +167,7 @@ Note: prefer wording that is easiest for an LLM to follow, while staying simple 
 - Wait for explicit user request before preparing, executing, publishing, deploying, or distributing — including drafting commit messages, commit commands, version bumps, or release notes.
 - **Leave every `git commit` for the user to execute. No EXCEPTION.**
 - Treat an explicit valid Package instruction for an established Ratified release batch as the trigger for release-prep bookkeeping.
+- Treat an explicit valid Package instruction for an established empty release batch as the same trigger.
 - Follow the Pre-Release Checklist in `govna/build-release.md` when executing release-prep bookkeeping.
 
 ### Effective Implementation Scope
@@ -335,16 +336,21 @@ Note: this rule does not prohibit batching independent commands.
 - Treat `Package` as the separate post-Ratify name for release preparation, not as a fifth AC phase.
 - Start `Package` only after an explicit Director request.
 - Do not infer Package from Ratify acceptance.
-- Treat standalone `Package`, `package`, `pack`, and `prep` as equivalent names for `Package` only after Ratify acceptance.
+- Treat standalone `Package`, `package`, `pack`, and `prep` as equivalent names for `Package` only after Ratify acceptance or for an established empty release batch.
 - Use the successful final full build and clean Ratify review as current pre-change Package evidence.
 - Pass the full build's validation token to Rust prep during `Package` only when the repository provides Rust validation-token support.
 - Fall back to a pre-change full build only when Rust validation-token support exists and its prep evidence is missing or stale.
 - Define the pending release batch as every unpackaged AC whose implementation is present in the unreleased repository state.
 - Include an implemented AC in the pending release batch while it awaits Ratify.
+- Define an empty release batch as an empty pending release batch with at least one unreleased direct-handled change.
+- Treat an empty release batch as established only after an explicit Director Package request.
+- Use the successful final full build as current Package evidence for an empty release batch.
 - Require every pending release-batch member to complete Ratify before Package.
 - Require the established release batch to equal the complete pending release batch.
 - Reject Package while excluded implemented work remains in the unreleased repository state.
 - Require the release-message AC-reference set to equal the established release batch before Package runs prep.
+- Describe each direct-handled change in the release message for an empty release batch.
+- Reject a release message without AC references while any unpackaged implemented AC exists.
 - Preserve release-prep mutations, release behavior, and approval boundaries during `Package`.
 
 ### Phase-Advancement Rules
@@ -363,6 +369,7 @@ Note: this rule does not prohibit batching independent commands.
 - Treat only a Director-named complete pending release batch as an established multi-AC release batch.
 - Accept only Package followed by a plus-joined list of uppercase AC<number> references as the named-batch Package form.
 - Apply standalone Package, package, pack, or prep to the established Ratified release batch.
+- Apply standalone Package, package, pack, or prep to an established empty release batch when no AC can enter Package.
 - Ask the Director to name the release batch when multiple ungrouped Ratified ACs can enter Package.
 - Reject a named release batch that contains a non-Ratified AC.
 - Measure the projected complete pending release batch with one private provisional prefix-plus-summary string before another AC enters Implement.
@@ -377,7 +384,7 @@ Note: this rule does not prohibit batching independent commands.
 - Pause before any unnamed action.
 - Treat ambiguous, unrelated, or implicit replies as non-advancing feedback.
 - Interpret Audit, Refine, Implement, and Ratify as workflow phases only in the context of the active AC cycle.
-- Interpret standalone `Package`, `package`, `pack`, or `prep` as post-Ratify Package only after acceptance and explicit request.
+- Interpret standalone `Package`, `package`, `pack`, or `prep` as Package only after an explicit request for a Ratified or empty release batch.
 - Do not interpret `run ./build.sh prep ...`, `pack the binary`, `prepare the build`, or non-standalone `prep` as workflow advancement.
 - Treat ordinary coding language such as `build`, `package the binary`, or a package-manager command as unrelated to phase advancement.
 - Require explicit operational wording such as `run ./build.sh` before executing a repository command.

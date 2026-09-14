@@ -46,14 +46,19 @@ func Title(value string, mode ColorMode) string {
 	return style(value, "1;38;5;231", mode)
 }
 
-// Subtitle styles the root-help subtitle with the established gray role.
+// Subtitle styles the help description line with the established gray role.
 func Subtitle(value string, mode ColorMode) string {
 	return style(value, "38;5;245", mode)
 }
 
-// Section styles root-help section headings with the established white role.
+// Link styles the help URL line with the governed dark-gray role.
+func Link(value string, mode ColorMode) string {
+	return style(value, "38;5;242", mode)
+}
+
+// Section styles help section headings with the governed bold-white role.
 func Section(value string, mode ColorMode) string {
-	return style(value, "38;5;255", mode)
+	return style(value, "1;38;5;231", mode)
 }
 
 // Usage styles a help usage label with the governed bold-white role.

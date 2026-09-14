@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -134,8 +135,8 @@ func rotoWireList(block, class string) string {
 		return ""
 	}
 	tail := block[start:]
-	if end := strings.Index(tail, "</ul>"); end >= 0 {
-		return tail[:end]
+	if before, _, ok := strings.Cut(tail, "</ul>"); ok {
+		return before
 	}
 	return tail
 }
@@ -169,16 +170,16 @@ func rotoWireTextForClass(block, class string) (string, bool) {
 		return "", false
 	}
 	tail := block[start:]
-	open := strings.IndexByte(tail, '>')
-	if open < 0 {
+	_, after, ok := strings.Cut(tail, ">")
+	if !ok {
 		return "", false
 	}
-	content := tail[open+1:]
-	close := strings.IndexByte(content, '<')
-	if close < 0 {
+	content := after
+	before0, _, ok0 := strings.Cut(content, "<")
+	if !ok0 {
 		return "", false
 	}
-	value := strings.TrimSpace(html.UnescapeString(content[:close]))
+	value := strings.TrimSpace(html.UnescapeString(before0))
 	return value, value != ""
 }
 
@@ -203,25 +204,20 @@ func rotoWireAnchorText(value string) (string, bool) {
 
 func rotoWireAttribute(value, name string) (string, bool) {
 	marker := name + `="`
-	start := strings.Index(value, marker)
-	if start < 0 {
+	_, after, ok := strings.Cut(value, marker)
+	if !ok {
 		return "", false
 	}
-	tail := value[start+len(marker):]
-	end := strings.IndexByte(tail, '"')
-	if end < 0 {
+	tail := after
+	before0, _, ok0 := strings.Cut(tail, "\"")
+	if !ok0 {
 		return "", false
 	}
-	return tail[:end], true
+	return before0, true
 }
 
 func rotoWireClass(value, class string) bool {
-	for _, candidate := range strings.Fields(value) {
-		if candidate == class {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Fields(value), class)
 }
 
 // NormalizeRotoWireTeam converts displayed club names to skout abbreviations.

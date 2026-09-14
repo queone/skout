@@ -812,10 +812,7 @@ func (client *MLBClient) aggregateQualityStarts(personIDs []int64, fetch func(in
 		panicked bool
 	}
 	for start := 0; start < len(unique); start += 5 {
-		end := start + 5
-		if end > len(unique) {
-			end = len(unique)
-		}
+		end := min(start+5, len(unique))
 		batch := unique[start:end]
 		outcomes := make([]outcome, len(batch))
 		var workers sync.WaitGroup

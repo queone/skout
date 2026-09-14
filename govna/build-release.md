@@ -67,6 +67,9 @@ Run `./build.sh` without targets for repository-wide validation. Follow the appl
 - Prohibit a smaller release batch while excluded implemented work remains.
 - Prohibit automatic release-batch splitting.
 - Do not treat `./build.sh prep ...` or ordinary build-preparation language as a workflow request.
+- Apply this checklist equally to an established empty release batch.
+- Describe each direct-handled change in the release message for an empty release batch.
+- Reject a release message without AC references while any unpackaged implemented AC exists.
 
 Note: the operator flow has two steps.
 
@@ -77,6 +80,7 @@ Note: the operator flow has two steps.
    - Keep the release message on one line and inside one Markdown table cell.
    - Exclude every AC reference outside the established release batch.
    - Use the successful final full build and clean Ratify review as current Package evidence.
+   - Use the successful final full build as current Package evidence for an empty release batch.
    - Rerun applicable validation before prep when Package evidence is missing or stale.
    - Run the stack-defined `./build.sh prep vX.Y.Z "message"` invocation.
    - Pass current validation evidence with `--validation-token` or `-t` when supported.
@@ -111,7 +115,7 @@ Go `./build.sh prep` performs bookkeeping only. It follows these phases:
    - Detect the root `CHANGELOG.md` target.
    - Require the canonical heading and two-column table.
    - Reject an existing row for the target version before any write.
-5. **Parse AC refs.** Scan the release message for `AC[0-9]+`; require one matching AC file for every unique reference after the Operator verifies exact release-batch equality.
+5. **Parse AC refs.** Scan the release message for `AC[0-9]+`; require one matching AC file for every unique reference after the Operator verifies exact release-batch equality. Accept a message without AC references.
 6. **Apply writes.**
    - Apply idempotent version bumps.
    - Insert the CHANGELOG row under `| Unreleased | |`.

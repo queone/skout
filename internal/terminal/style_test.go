@@ -36,8 +36,14 @@ func TestStyleRolesAreExactAndPlainModeHasNoANSI(t *testing.T) {
 	if got, want := Subtitle("advisor", Color), "\x1b[38;5;245madvisor\x1b[0m"; got != want {
 		t.Errorf("Subtitle() = %q, want %q", got, want)
 	}
-	if got, want := Section("USAGE", Color), "\x1b[38;5;255mUSAGE\x1b[0m"; got != want {
+	if got, want := Section("Usage", Color), "\x1b[1;38;5;231mUsage\x1b[0m"; got != want {
 		t.Errorf("Section() = %q, want %q", got, want)
+	}
+	if got, want := Link("github.com/queone/skout", Color), "\x1b[38;5;242mgithub.com/queone/skout\x1b[0m"; got != want {
+		t.Errorf("Link() = %q, want %q", got, want)
+	}
+	if got := Link("github.com/queone/skout", Plain); got != "github.com/queone/skout" {
+		t.Errorf("plain Link() = %q", got)
 	}
 	if got, want := Usage("Usage:", Color), "\x1b[1;38;5;231mUsage:\x1b[0m"; got != want {
 		t.Errorf("Usage() = %q, want %q", got, want)
@@ -74,7 +80,7 @@ func TestStyleRolesAreExactAndPlainModeHasNoANSI(t *testing.T) {
 	for name, test := range map[string]struct{ got, want string }{
 		"Title":    {Title("skout", Plain), "skout"},
 		"Subtitle": {Subtitle("advisor", Plain), "advisor"},
-		"Section":  {Section("USAGE", Plain), "USAGE"},
+		"Section":  {Section("Usage", Plain), "Usage"},
 		"Usage":    {Usage("Usage:", Plain), "Usage:"},
 		"Heading":  {Heading("BASEBALL", Plain), "BASEBALL"},
 		"Alias":    {Alias("Aliases: PA", Plain), "Aliases: PA"},

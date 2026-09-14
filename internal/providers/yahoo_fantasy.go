@@ -693,7 +693,7 @@ func ParseRosterWeekStats(teamKey string, week int, payload []byte) (domain.Rost
 		stats := yahooTeamStatistics(values)
 		display, role := yahooText(values, "display_position"), yahooText(values, "position_type")
 		if role == "" {
-			for _, position := range strings.Split(display, ",") {
+			for position := range strings.SplitSeq(display, ",") {
 				if position = strings.TrimSpace(position); position == "P" || position == "SP" || position == "RP" {
 					role = "P"
 					break

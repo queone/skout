@@ -1,11 +1,15 @@
-Look up a term in the skout glossary
+skout v{{VERSION}}
+Fantasy Baseball advisor
+github.com/queone/skout
 
-Usage: skout i [OPTIONS] [TERM]
+Usage
+  skout i [options] [TERM]
 
-Arguments:
-  [TERM]
+Commands
+  i [TERM]  Look up a term in the skout glossary
 
-Options:
-  -l, --league <KEY>                 Yahoo league key
-  -d, --debug                        Print operation diagnostics
-  -h, -?, --help                     Print this help
+Options
+  -l, --league <KEY>  Yahoo league key
+  -d, --debug         Print operation diagnostics
+  -v, --version       Print version
+  -h, -?, --help      Print this help

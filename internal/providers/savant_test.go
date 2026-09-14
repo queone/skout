@@ -93,7 +93,7 @@ func TestSavantFastballVeloFallsBackToSinkerThenCutter(t *testing.T) {
 	if err != nil || len(rows) != 5 {
 		t.Fatalf("rows=%#v err=%v", rows, err)
 	}
-	want := []*float64{ptrFloat(95.1), ptrFloat(98.3), ptrFloat(90.5), nil, ptrFloat(97.2)}
+	want := []*float64{new(95.1), new(98.3), new(90.5), nil, new(97.2)}
 	for index, row := range rows {
 		if (row.FastballVelo == nil) != (want[index] == nil) || row.FastballVelo != nil && *row.FastballVelo != *want[index] {
 			t.Fatalf("row %d fastball velo=%v want %v", index+1, row.FastballVelo, want[index])
@@ -104,8 +104,6 @@ func TestSavantFastballVeloFallsBackToSinkerThenCutter(t *testing.T) {
 		t.Fatalf("legacy shape without sinker columns: rows=%#v err=%v", rows, err)
 	}
 }
-
-func ptrFloat(value float64) *float64 { return &value }
 
 func TestSavantStripsOnlyOneLeadingBOMAndKeepsStrictCSVQuoting(t *testing.T) {
 	header := "player_id,pa,bbe,est_woba,exit_velocity_avg,brl_percent,hard_hit_percent,k_percent,bb_percent,sprint_speed,on_base_plus_slg\n"

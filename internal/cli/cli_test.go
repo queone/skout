@@ -21,7 +21,7 @@ func TestCompleteCommandGrammarProvidesAllHelpForms(t *testing.T) {
 		for _, flag := range []string{"-h", "-?", "--help"} {
 			var stdout, stderr bytes.Buffer
 			code := Run([]string{command.name, flag}, "0.2.0", Context{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr, Prompt: &stderr}, Handlers{})
-			if code != 0 || stdout.Len() == 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), command.description) || !strings.Contains(stdout.String(), "Usage:") {
+			if code != 0 || stdout.Len() == 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), command.description) || !strings.Contains(stdout.String(), "Usage\n  skout ") {
 				t.Errorf("%s %s code=%d stdout=%q stderr=%q", command.name, flag, code, stdout.String(), stderr.String())
 			}
 		}
@@ -144,18 +144,20 @@ func TestSeasonFlagDispatchesAndValidates(t *testing.T) {
 	}
 }
 
-func TestGovernedAndFrozenCommandHelpLayoutsAreExact(t *testing.T) {
+func TestCommandHelpPagesShareTheRootHeaderAndAlignOptions(t *testing.T) {
+	const version = "0.5.0"
 	glossaryHelp, err := os.ReadFile("../../cmd/skout/testdata/glossary-help.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
+	want := strings.Replace(string(glossaryHelp), "{{VERSION}}", version, 1)
 	command, _ := findCommand("i")
-	if got := CommandHelp(command, terminal.Plain); got != string(glossaryHelp) {
-		t.Fatalf("glossary help differs\nGOT:\n%s\nWANT:\n%s", got, glossaryHelp)
+	if got := CommandHelp(command, version, terminal.Plain); got != want {
+		t.Fatalf("glossary help differs\nGOT:\n%s\nWANT:\n%s", got, want)
 	}
 	command, _ = findCommand("t")
-	want := "Show MLB 40-man rosters\n\nUsage: skout t [OPTIONS] [TEAM]\n\nArguments:\n  [TEAM]  \n\nOptions:\n  -f, --force         Refresh provider data\n  -h, -?, --help      \n  -l, --league <KEY>  Yahoo league key\n  -d, --debug         Print operation diagnostics\n"
-	if got := CommandHelp(command, terminal.Plain); got != want {
+	want = "skout v0.5.0\nFantasy Baseball advisor\ngithub.com/queone/skout\n\nUsage\n  skout t [options] [TEAM]\n\nCommands\n  t [TEAM]  Show MLB 40-man rosters\n\nOptions\n  -f, --force         Refresh provider data\n  -l, --league <KEY>  Yahoo league key\n  -d, --debug         Print operation diagnostics\n  -v, --version       Print version\n  -h, -?, --help      Print this help\n"
+	if got := CommandHelp(command, version, terminal.Plain); got != want {
 		t.Fatalf("team help differs\nGOT:\n%s\nWANT:\n%s", got, want)
 	}
 }
@@ -179,11 +181,20 @@ func TestFrozenParserDiagnosticsRemainExact(t *testing.T) {
 	}
 }
 
-func TestCompoundRootHelpAndVersionUseFrozenParserActions(t *testing.T) {
+func TestCompoundRootHelpAndVersionUseTheSharedRenderer(t *testing.T) {
 	for _, test := range []struct {
 		args     []string
 		contains string
-	}{{[]string{"--help", "extra"}, "Usage: skout [OPTIONS] [COMMAND]"}, {[]string{"-d", "--help"}, "Commands:\n  fetch"}, {[]string{"--version", "extra"}, "skout 0.2.0\n"}} {
+	}{
+		{[]string{"--help", "extra"}, "Usage\n  skout COMMAND [options]\n"},
+		{[]string{"-d", "--help"}, "Commands\n  st "},
+		{[]string{"-d", "-?"}, "Commands\n  st "},
+		{[]string{"help"}, "Options\n  -l, --league <KEY>  Yahoo league key\n"},
+		{[]string{"--version", "extra"}, "skout v0.2.0\n"},
+		{[]string{"version"}, "skout v0.2.0\n"},
+		{[]string{"m", "-v"}, "skout v0.2.0\n"},
+		{[]string{"m", "--version", "extra"}, "skout v0.2.0\n"},
+	} {
 		var stdout, stderr bytes.Buffer
 		if code := Run(test.args, "0.2.0", Context{Stdout: &stdout, Stderr: &stderr}, Handlers{}); code != 0 || !strings.Contains(stdout.String(), test.contains) || stderr.Len() != 0 {
 			t.Errorf("args=%v code=%d stdout=%q stderr=%q", test.args, code, stdout.String(), stderr.String())
@@ -191,7 +202,7 @@ func TestCompoundRootHelpAndVersionUseFrozenParserActions(t *testing.T) {
 	}
 }
 
-func TestRootHelpAndGlossaryPlainBehaviorRemainFrozen(t *testing.T) {
+func TestRootHelpFormsMatchGoldenAndGlossaryOutputRemainsFrozen(t *testing.T) {
 	want, err := os.ReadFile("../../cmd/skout/testdata/root-help.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -216,11 +227,15 @@ func TestRootHelpAndGlossaryPlainBehaviorRemainFrozen(t *testing.T) {
 func TestRootHelpColorRolesAreExact(t *testing.T) {
 	const version = "0.5.0"
 	plain := RootHelp(version, terminal.Plain)
+	if strings.Contains(plain, "\x1b[") {
+		t.Fatal("plain root help carries an escape sequence")
+	}
 	want := strings.Replace(plain, "skout", "\x1b[1;38;5;231mskout\x1b[0m", 1)
-	want = strings.Replace(want, "Fantasy Baseball advisor — github.com/queone/skout", "\x1b[38;5;245mFantasy Baseball advisor — github.com/queone/skout\x1b[0m", 1)
-	want = strings.Replace(want, "USAGE", "\x1b[38;5;255mUSAGE\x1b[0m", 1)
-	want = strings.Replace(want, "COMMANDS", "\x1b[38;5;255mCOMMANDS\x1b[0m", 1)
-	want = strings.Replace(want, "\nFLAGS\n", "\n\x1b[38;5;255mFLAGS\x1b[0m\n", 1)
+	want = strings.Replace(want, "Fantasy Baseball advisor", "\x1b[38;5;245mFantasy Baseball advisor\x1b[0m", 1)
+	want = strings.Replace(want, "github.com/queone/skout", "\x1b[38;5;242mgithub.com/queone/skout\x1b[0m", 1)
+	for _, heading := range []string{"Usage", "Commands", "Options"} {
+		want = strings.Replace(want, "\n"+heading+"\n", "\n\x1b[1;38;5;231m"+heading+"\x1b[0m\n", 1)
+	}
 	if got := RootHelp(version, terminal.Color); got != want {
 		t.Fatalf("colored root help differs\nGOT:\n%q\nWANT:\n%q", got, want)
 	}

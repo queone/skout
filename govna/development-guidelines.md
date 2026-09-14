@@ -65,16 +65,46 @@ Keep repo-specific practices in `## Project Practices`.
 
 ## CLI Usage Formatting
 
-- Accept `-h`, `-?`, and `--help` as help flags for every command.
-- Use a shared formatting function for help output.
-- Render `Usage:` in bold white.
-- Indent each flag line by 2 spaces
-- Align descriptions at column 38
+- Apply these rules to every command-line utility's help and version output.
+- Accept `-h`, `-?`, and `--help` as help flags in every utility.
+- Accept `-v` and `--version` as version flags in every utility.
+- Accept `help` and `version` as commands in every multi-command utility.
+- Print requested help on stdout.
+- Exit 0 after printing requested help.
+- Print `<name> v<version>` for `--version`.
+- Render help through one shared renderer.
+- Render each command's help page through the same renderer with the same header.
+- Print the utility name in bold white followed by ` v<version>` in plain text as line one.
+- Print a one-line description with no trailing period in gray as line two.
+- Print the utility's URL alone, with no scheme, in dark gray as line three.
+- Leave line four blank.
+- Order sections as `Usage`, `Commands`, `Options`, one optional utility-specific section, `Examples`.
+- Keep `Usage` and `Options` in every utility.
+- Keep `Commands` only in a multi-command utility.
+- Keep `Examples` last when present.
+- Move `Overview` and `Notes` content to the README.
+- Render each heading as one capitalized word in bold white on its own line with no colon.
+- Indent each section body by 2 spaces.
+- Separate sections with one blank line.
+- Keep every line inside a section.
+- Give `Usage` one synopsis per invocation form.
+- Give `Usage` one generic synopsis in a multi-command utility.
+- Write `Usage` placeholders in uppercase.
+- List each command's form and meaning as a `Commands` row.
 - Combine short and long flag forms on one line.
-- Add every new flag to the shared usage formatter.
+- Write option arguments in uppercase.
+- Align meanings two spaces past the longest form in the section.
+- End `Options` with the `-v, --version` and `-h, -?, --help` rows, appended by the renderer.
+- Allow one indented paragraph at the end of a section body.
+- Keep a utility README's `### Usage` text block byte-equal to the utility's plain help output.
+- Emit one escape sequence per colored span.
+- Emit no escape sequence when output is not a color terminal.
+- Add every new flag to the shared renderer.
 - Do not rely on framework defaults for new flags.
-- Describe each command by the repository content it reads or writes.
-- Explain whether each command changes repository content.
+- Describe each command by what it reads or writes.
+- State whether each command changes files.
+
+Note: colors are xterm-256 index 231 with bold for the name and headings (one sequence, `ESC[1;38;5;231m`), 245 for the description, and 242 for the URL.
 
 ## Documentation Alignment
 

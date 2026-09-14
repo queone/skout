@@ -152,11 +152,11 @@ func NormalizeFanGraphsTeam(value string) string {
 
 func closerCell(row, stat string) (string, bool) {
 	marker := `data-stat="` + stat + `"`
-	offset := strings.Index(row, marker)
-	if offset < 0 {
+	_, after, ok := strings.Cut(row, marker)
+	if !ok {
 		return "", false
 	}
-	tail := row[offset+len(marker):]
+	tail := after
 	start := strings.IndexByte(tail, '>')
 	if start < 0 {
 		return "", false

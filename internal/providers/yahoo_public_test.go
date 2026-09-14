@@ -220,7 +220,6 @@ func TestYahooPublicLeagueKeysEndpointsBoundsAndFailures(t *testing.T) {
 		t.Fatal("invalid daily date dispatched")
 	}
 	for _, fixture := range []string{"redzone-malformed.json", "redzone-no-teams.json"} {
-		fixture := fixture
 		fixtureClient := NewProductionYahooPublicClient(transport.New(providerExecutor{execute: func(transport.ValidatedRequest) (transport.Response, error) {
 			return fixtureResponse(t, "testdata/yahoo/"+fixture), nil
 		}}))
@@ -286,7 +285,7 @@ func TestYahooLeagueRostersBoundsConcurrencyAndSerializesProgress(t *testing.T) 
 		<-release
 		active.Add(-1)
 		target, _ := url.Parse(request.URL())
-		teamPart := strings.Split(strings.Split(target.Path, ".t.")[1], "/")[0]
+		teamPart, _, _ := strings.Cut(strings.Split(target.Path, ".t.")[1], "/")
 		playerID, _ := strconv.Atoi(teamPart)
 		payload, _ := json.Marshal(map[string]any{"data": map[string]any{"players": []map[string]any{{
 			"player_id": playerID, "full": fmt.Sprintf("Player %d", playerID), "position_type": "B", "display_position": "OF",
