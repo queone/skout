@@ -119,7 +119,7 @@ Require a final newline. Require exactly one non-empty command line after the he
 
 ## Target-only detection
 
-Audit classifies an existing target as `target-has-no-canon` when the path is absent from current flavor canon, the preserve registry does not name it, and at least one bounded evidence source identifies it: the valid prior baseline, the pre-baseline retired-path tombstone registry, other-flavor canon, or a path reference from an already-divergent governed file. Evidence is merged by target path with tombstone replacement metadata retained, then emitted in deterministic path order.
+Audit classifies an existing target as `target-has-no-canon` when the path is absent from current flavor canon, the preserve registry does not name it, and at least one bounded evidence source identifies it: the valid prior baseline, the pre-baseline retired-path tombstone registry, other-flavor canon, or a path reference from an already-divergent governed file. A reference to a consumer-owned `govna/ac<N>-<slug>.md` document is not evidence, because `plan.md` AC-pointers name drafted ACs by design. Evidence is merged by target path with tombstone replacement metadata retained, then emitted in deterministic path order.
 
 The tombstone registry bridges removals that predate baseline adoption. It currently records `govna/drift-scan.md` as replaced by `govna/audit.md`. A missing current-canon replacement already appears as a direct update. The emitted AC names and installs that replacement before routing the retired source to preserve, explicitly named migration, or delete. It never offers restore as a separate routing outcome.
 
@@ -171,12 +171,10 @@ An audit with no updates or Director choices exits successfully and prints `No G
 
 ### Agent-mediated review
 
+- Follow `AGENTS.md` `### Audit Adoption` for every phase entry, pause, and exit of this review.
 - Resolve the Govna executable path before running the agent-mediated audit.
 - Record the detailed version output from that resolved executable.
 - Run the ordinary agent-mediated audit without `--json`.
-- Enter Audit only when the command emits or reuses one guarded adoption AC.
-- Keep a clean result or pre-emission failure outside the AC phases.
-- Audit the emitted AC immediately.
 - Require the emitted AC marker versions to match the recorded detailed version.
 - Create exactly one unique system-temporary scratch directory outside the consumer repository.
 - Render the selected canon into that scratch directory once with the resolved executable.
@@ -189,17 +187,7 @@ An audit with no updates or Director choices exits successfully and prints `No G
 - Verify target-side acceptance evidence.
 - Keep the emitted AC and consumer repository unchanged during Audit and Refine.
 - Remove the exact scratch directory before reporting Audit completion or a blocker.
-- End scratch-review authority when Audit ends.
 - Report every blocking finding and Director decision.
-- Pause while any blocking finding or Director decision remains unresolved.
-- Resume Refine after the Director resolves every blocking finding and decision.
-- Require a new audit emission when a required correction would change the immutable AC.
-- Complete Refine without editing the emitted AC when no blocker remains.
-- Run Pre-Implementation Verification after Refine.
-- Report implementation readiness only when Pre-Implementation Verification passes.
-- Remain in Refine when Pre-Implementation Verification finds a gap.
-- Stop before Implement.
-- Track the active phase in the session instead of the emitted AC.
 
 Note: the executable ends after deterministic comparison and emission. The original explicit `govna audit` request authorizes this one bounded scratch review and its exact cleanup. The immutable AC records the adoption work; the active session records its phase. JSON remains available as optional machine output, but its diff fields are not required evidence for ordinary agent-mediated review.
 
@@ -252,7 +240,6 @@ Effective implementation scope is the narrow rule that permits a directly affect
 - Treat a preserve choice on that file as conversion of its legacy phrase.
 - Verify the result of every resolved sync, migration, or deletion before legacy-phrase cleanup.
 - Remove the exact legacy phrase after that verification.
-- Preserve unrelated CHANGELOG Summary text and historical rows.
 
 ### Mixed-content sync verification
 

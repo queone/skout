@@ -570,6 +570,20 @@ _extract_template_version() { # $1=version.go path -> version or empty
   ' "$1"
 }
 
+_readme_usage_line() { # $1=README path -> first line of the first text fence after the first "### Usage" heading, or empty
+  [ -f "$1" ] || { printf ''; return 0; }
+  awk '/^### Usage$/{f=1;next} f==1&&/^```text$/{f=2;next} f==2&&/^```$/{exit} f==2{print; exit}' "$1"
+}
+
+_readme_usage_version() { # $1=README path $2=utility ID -> version from "<utility> v<version>" or empty
+  local line
+  line=$(_readme_usage_line "$1")
+  case "$line" in
+  "$2 v"*) printf '%s' "${line#"$2 v"}" ;;
+  *) printf '' ;;
+  esac
+}
+
 _is_strict_stable_semver() { # $1=version -> success when MAJOR.MINOR.PATCH
   printf '%s' "$1" | LC_ALL=C grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 }
@@ -1137,6 +1151,7 @@ _release_validate_prepared() { # $1=tag $2=message
     case "$kind" in
     programVersion) actual=$(_extract_program_version "$path") ;;
     TemplateVersion) actual=$(_extract_template_version "$path") ;;
+    readmeUsage) actual=$(_readme_usage_version "$path" "$(basename "$(dirname "$path")")") ;;
     *) actual='' ;;
     esac
     [ "$actual" = "$version" ] || {
@@ -1420,6 +1435,7 @@ _prep_run_inner() {
   local vtargets="$_prep_vtargets"
   [ -n "$_prep_warning" ] && printf '%s\n' "$_prep_warning"
   _prep_validate_version_plan "$vtargets" "$vstripped" || return 1
+  _prep_validate_readme_usage "$root" "$vtargets" "$vstripped" || return 1
 
   # Phase 4: detect CHANGELOG targets (+ idempotency guard). Direct call so
   # _prep_cl_err/_prep_ctargets propagate.
@@ -1510,6 +1526,11 @@ EOF
   fi
   _prep_verify_expected_files "$root" "$vtargets" "$ctargets" "$ielines" || return 1
   _prep_verify_result "$root" "$vtargets" "$ctargets" "$vstripped" "$message" "$acfiles" "$ielines" || return 1
+  while IFS="$(printf '\t')" read -r path kind; do
+    [ "$kind" = readmeUsage ] && printf 'prep: verified README usage line in %s\n' "${path#"$root"/}"
+  done <<EOF
+$vtargets
+EOF
 
   # Phase 9: emit release command.
   _prep_emit_release_command "$version" "$message"
@@ -1622,6 +1643,23 @@ _prep_detect_version_targets() {
     _prep_warning="multi-utility repo detected (${#pv[@]} programVersion targets, $hint): per-utility programVersion bumps skipped (each utility owns its own version per its own AC). Skipped: $joined"
   fi
 
+  # README usage lines: for each bumped utility whose cmd/<name>/README.md opens
+  # its first "### Usage" text fence with "<name> v<old>", plan a rewrite of that
+  # line so the canon help probe keeps matching after the bump.
+  local entry tpath tkind uname ureadme readme_targets=()
+  for entry in ${targets[@]+"${targets[@]}"}; do
+    tpath=${entry%%"$tab"*}
+    tkind=${entry#*"$tab"}
+    [ "$tkind" = programVersion ] || continue
+    uname=$(basename "$(dirname "$tpath")")
+    ureadme="$root/cmd/$uname/README.md"
+    [ -f "$ureadme" ] || continue
+    if [ "$(_readme_usage_line "$ureadme")" = "$uname v$(_extract_program_version "$tpath")" ]; then
+      readme_targets+=("$ureadme${tab}readmeUsage")
+    fi
+  done
+  targets+=(${readme_targets[@]+"${readme_targets[@]}"})
+
   if [ -d "$root/internal/templates/base" ]; then
     local tvgo="$root/internal/templates/version.go"
     if [ -f "$tvgo" ] && grep -Eq 'const[[:space:]]+TemplateVersion[[:space:]]*=[[:space:]]*"[^"]+"' "$tvgo"; then
@@ -1671,6 +1709,30 @@ _prep_validate_multi_utility_versions() { # $1=root
   done
 }
 
+_prep_validate_readme_usage() { # $1=root $2=targets $3=requested version
+  local root="$1" targets="$2" requested="$3" path kind uname readme current line tab
+  tab=$(printf '\t')
+  while IFS="$tab" read -r path kind; do
+    [ -n "$path" ] || continue
+    [ "$kind" = programVersion ] || continue
+    uname=$(basename "$(dirname "$path")")
+    readme="$root/cmd/$uname/README.md"
+    [ -f "$readme" ] || continue
+    current=$(_extract_program_version "$path")
+    line=$(_readme_usage_line "$readme")
+    case "$line" in
+    "$uname v$current" | "$uname v$requested") ;;
+    *)
+      printf 'prep: cmd/%s/README.md %s text block must open with "%s v%s" (found "%s"); paste the plain help output there and retry\n' \
+        "$uname" "'### Usage'" "$uname" "$current" "$line" >&2
+      return 1
+      ;;
+    esac
+  done <<EOF
+$targets
+EOF
+}
+
 _prep_validate_version_plan() { # $1=targets $2=requested version
   local targets="$1" requested="$2" path kind current tab
   tab=$(printf '\t')
@@ -1685,6 +1747,7 @@ _prep_validate_version_plan() { # $1=targets $2=requested version
       current=$(_extract_program_version "$path")
       ;;
     TemplateVersion) current=$(_extract_template_version "$path") ;;
+    readmeUsage) current=$(_readme_usage_version "$path" "$(basename "$(dirname "$path")")") ;;
     *)
       printf 'prep: unknown version target kind: %s\n' "$kind" >&2
       return 1
@@ -1946,6 +2009,7 @@ _prep_verify_result() { # root vtargets ctargets version message acfiles ielines
     case "$kind" in
     programVersion) actual=$(_extract_program_version "$path") ;;
     TemplateVersion) actual=$(_extract_template_version "$path") ;;
+    readmeUsage) actual=$(_readme_usage_version "$path" "$(basename "$(dirname "$path")")") ;;
     *) actual='' ;;
     esac
     if [ "$actual" != "$version" ] || ! _is_strict_stable_semver "$actual"; then
@@ -1984,9 +2048,38 @@ $ielines
 EOF
 }
 
+_prep_apply_readme_usage() { # $1=README path $2=vstripped
+  local path="$1" v="$2" uname line tmp
+  uname=$(basename "$(dirname "$path")")
+  line=$(_readme_usage_line "$path")
+  case "$line" in
+  "$uname v"*) ;;
+  *)
+    _prep_bump_err="no '### Usage' text fence opening with $uname v<version> in $path"
+    return 1
+    ;;
+  esac
+  tmp=$(mktemp "$(_tmp_root)/prep-readme.XXXXXX")
+  if ! usage_line="$uname v$v" awk '
+    BEGIN { line = ENVIRON["usage_line"] }
+    state == 0 && /^### Usage$/ { state = 1 }
+    state == 1 && /^```text$/ { state = 2; print; next }
+    state == 2 { if ($0 !~ /^```$/) $0 = line; state = 3 }
+    { print }
+  ' "$path" >"$tmp"; then
+    rm -f "$tmp"; _prep_bump_err="awk failed on $path"; return 1
+  fi
+  if ! cat "$tmp" 2>/dev/null >"$path"; then rm -f "$tmp"; _prep_bump_err="write failed: $path"; return 1; fi
+  rm -f "$tmp"
+}
+
 _prep_apply_version_bump() { # $1=path $2=kind $3=vstripped
   local path="$1" kind="$2" v="$3"
   _prep_bump_err=''
+  if [ "$kind" = readmeUsage ]; then
+    _prep_apply_readme_usage "$path" "$v"
+    return
+  fi
   local pat
   case "$kind" in
   programVersion) pat='(programVersion[[:space:]]*(string[[:space:]]*)?=[[:space:]]*)"[^"]*"' ;;

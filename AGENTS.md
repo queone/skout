@@ -154,7 +154,7 @@ Note: prefer wording that is easiest for an LLM to follow, while staying simple 
 
 - Treat each authorization as scope-limited.
 - Require fresh approval for every new action.
-- Treat an explicit request to run govna audit as authorization for integrated audit adoption under ### Audit Adoption.
+- Treat an explicit request to run govna audit as authorization for integrated audit adoption under `### Audit Adoption`.
 - Continue Director-authorized Implement authority only for an eligible bounded completeness correction under `### Four-Phase Workflow`.
 - Require explicit approval for: create, delete, rename, publish, release, or any destructive change.
 - Require explicit approval for: governance files, CI/release config, secrets handling, external integrations.

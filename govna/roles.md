@@ -60,14 +60,11 @@ This file defines Operator and Director ownership. `AGENTS.md` is authoritative.
 
 ### Response style
 
-- Follow `AGENTS.md` Review Style.
+- Follow `AGENTS.md` `## Review Style` and `## Interaction Mode`.
 - Use one-line acknowledgments for trivial signals.
 - Use structured summaries for substantive completions or Director decisions.
 - Lead substantive summaries with the concrete result or actionable exception.
 - Explain each necessary Govna workflow label after that plain result.
-- Address the Director as `you` in chat.
-- Reserve third-person `the Director` for rules and records.
-- Ask the Director for each decision as a direct question with a recommendation.
 
 ## What the Operator Must Defer
 

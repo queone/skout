@@ -101,7 +101,7 @@ Note: the operator flow has two steps.
 
 ### Appendix: what prep does
 
-Go `./build.sh prep` performs bookkeeping only. It follows these phases:
+`./build.sh prep` performs release bookkeeping in every CODE stack. Go and Terraform prep perform bookkeeping only. Rust prep adds a fallback pre-change full build when validation evidence is missing or stale and one post-change full build after its writes. Swift prep runs the canonical build before its writes and again with installation after them unless `-B` skips both. Every stack follows these bookkeeping phases:
 
 1. **Validate inputs.** Require strict stable SemVer and one non-empty, single-line, table-safe message of no more than 80 bytes.
 2. **Validate git state.** Inside a git work tree, target tag does not exist yet, HEAD is not at the latest tag with a clean working tree.
@@ -111,6 +111,7 @@ Go `./build.sh prep` performs bookkeeping only. It follows these phases:
    - Follow this repository's Project Practices.
    - Follow the stack build implementation.
    - Reject missing, malformed, duplicate, or unsafe targets before any write.
+   - Reject a bumped utility's README whose `### Usage` block cannot match the help probe.
 4. **Guard CHANGELOG shape and idempotency.**
    - Detect the root `CHANGELOG.md` target.
    - Require the canonical heading and two-column table.
@@ -118,6 +119,7 @@ Go `./build.sh prep` performs bookkeeping only. It follows these phases:
 5. **Parse AC refs.** Scan the release message for `AC[0-9]+`; require one matching AC file for every unique reference after the Operator verifies exact release-batch equality. Accept a message without AC references.
 6. **Apply writes.**
    - Apply idempotent version bumps.
+   - Rewrite each bumped utility's README `### Usage` version line.
    - Insert the CHANGELOG row under `| Unreleased | |`.
    - Delete each released AC file whole.
    - Sweep matching AC-pointer IE lines from `plan.md`.
