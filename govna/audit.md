@@ -53,6 +53,15 @@ Every emitted audit AC uses these shared explanations:
 
 Files absent from the selected embedded Govna files use `target-has-no-canon` only when specific baseline, retired-path, other-flavor, or governed-file evidence connects them to Govna. See Target-only detection.
 
+Audit reads every governed path through a contained handle on the resolved repository root and never follows a symbolic link.
+
+- Treat a path as missing only when nothing exists at it.
+- Fail the audit before emission when a governed path is a symbolic link, a directory, a special file, or unreadable.
+- Name the failed path and its recovery action in that failure.
+- Print no tally and no partial JSON report after that failure.
+- Leave every existing emitted AC unchanged after that failure.
+- Apply the same failure to a preserved path that exists but cannot be read.
+
 ## Format-defining files
 
 `govna/ac-template.md` and `AGENTS.md` are format-defining: any non-`match`, non-`expected-divergence` classification for these two files forces a sync entry in the emitted stub regardless of what the ordered check above produced (an `ambiguity` or `preserve` result still surfaces as a forced-sync note, since these two files define the shape every other AC and canon doc depends on).
@@ -95,6 +104,13 @@ Exclude `govna/preserve.txt` from rendered canon, canon baselines, ordinary audi
 
 Treat only exact legacy preserve phrases in the Unreleased CHANGELOG Summary as migration evidence: `preserve <path>`, `do not sync <path>`, `intentional divergence: <path>`, and `<path>: keep local`. Route each phrase under `### Routing capabilities`. Remove it only after verifying its required target and registry state. Preserve unrelated Summary text and historical rows. Ignore matching prose in historical CHANGELOG rows, emitted ACs, and every other governance document.
 
+- Read the Summary from the canonical `| Unreleased | <summary> |` table row, where each `\|` pair is one escaped pipe.
+- Read the Summary from a legacy `## Unreleased` heading section as well.
+- Combine both sources in table-then-heading order.
+- Drop a duplicate phrase-and-path pair.
+- Ignore a phrase whose path is not a normalized repository-relative path.
+- Accept LF or CRLF line endings in the changelog.
+
 A registry entry on a missing current-canon file suppresses `missing-in-target` to a suppressed `match`; an entry on a divergent current-canon file or an existing target-only file routes it to `preserve` instead of a review classification. Exceptions are an eligible stale-version-only `govna/metadata.txt`, whose canon-owned `canon_version` cannot be pinned, and a boundary-less CODE `govna/build-release.md`, which remains a reviewed migration.
 
 ## Repository-check registry
@@ -125,6 +141,12 @@ The tombstone registry bridges removals that predate baseline adoption. It curre
 
 Audit does not flag arbitrary consumer-owned governance documents that have none of these evidence sources. Audit never deletes or migrates a target file itself.
 
+- Require every evidence path to be a normalized repository-relative path.
+- Drop an escaping reference or legacy phrase path without inspecting it.
+- Inspect each candidate path without following links.
+- Treat an absent candidate or a directory as no evidence.
+- Fail the audit with a replace-the-link recovery action when a candidate path is a symbolic link.
+
 ## Migration-required items
 
 `govna/metadata.txt` or `govna/canon-baseline.txt` absent from an otherwise govna-adopted target classifies as `migration-required`. Every emitted AC includes `## Migration findings` after `## Out Of Scope`: it lists each migration path and completion action, or `None` when no migration exists. Migration paths also remain under `## In Scope`.
@@ -133,7 +155,11 @@ Audit does not flag arbitrary consumer-owned governance documents that have none
 
 `govna/canon-baseline.txt` is the baseline: the saved hashes of the Govna-managed file regions previously installed in the repository. Its first line is `govna-canon-baseline-v1`, its second line is `canon_version = vMAJOR.MINOR.PATCH`, and each sorted remaining line is `<path><TAB><scope><TAB><sha256>`. Scope is `full` or `before:<boundary-heading>`. The manifest excludes itself and `govna/preserve.txt`; neither is classified as an ordinary governed file.
 
-Audit fails before emission for malformed fields, duplicate or unsorted paths, invalid hashes, unknown or mismatched scopes, or a baseline canon version newer than embedded canon. A valid manifest missing one file entry routes that divergent file to `ambiguity`. Audit leaves the baseline unchanged; the emitted AC installs or replaces it last after all other work succeeds.
+Audit fails before emission for malformed fields, duplicate or unsorted paths, invalid hashes, unknown or mismatched scopes, an entry that is not a normalized repository-relative path, or a baseline canon version newer than embedded canon. A valid manifest missing one file entry routes that divergent file to `ambiguity`. Audit leaves the baseline unchanged; the emitted AC installs or replaces it last after all other work succeeds.
+
+- Reject an entry that is absolute, contains a backslash or control character, or has an empty, `.`, or `..` component.
+- Direct the consumer to correct the invalid entry before retrying.
+- Retain a valid entry for a file absent from current canon as target-only evidence.
 
 - Accept legacy `full` scope only for `govna/build-release.md` in a CODE target whose baseline canon version predates v0.11.0.
 - Retain the legacy hash only as migration evidence.
