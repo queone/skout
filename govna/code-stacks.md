@@ -8,7 +8,7 @@
 - Keep the repository/package release version separate from each installable utility version.
 - Identify each utility by its stack-selected canonical target.
 - Require one strict stable SemVer declaration for each utility.
-- Require each utility's `--version` result to be exactly `<utility-id> <MAJOR.MINOR.PATCH>` or `<utility-id> v<MAJOR.MINOR.PATCH>` plus its newline on stdout with no stderr output.
+- Require each utility's `--version` result to be exactly `<utility-id> v<MAJOR.MINOR.PATCH>` plus its newline on stdout with no stderr output.
 - Let each stack adapter choose declaration syntax and source layout while reporting the normalized utility contract.
 - Validate declarations before compilation.
 - Validate compiled versions before installation.

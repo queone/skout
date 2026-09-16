@@ -595,21 +595,19 @@ _validate_utility_version_output() { # $1=binary $2=utility ID $3=declared versi
     printf 'utility %s: create version probe workspace: check temporary-directory permissions and retry\n' "$utility_id" >&2
     return 1
   }
-  printf '%s\n' "$utility_id $declared" >"$probe_dir/expected"
-  printf '%s v%s\n' "$utility_id" "$declared" >"$probe_dir/expected-v"
+  printf '%s v%s\n' "$utility_id" "$declared" >"$probe_dir/expected"
   rc=0
   "$binary" --version >"$probe_dir/stdout" 2>"$probe_dir/stderr" || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf 'utility %s: --version failed with exit status %d; implement --version to print %s\n' \
-      "$utility_id" "$rc" "$utility_id $declared" >&2
+      "$utility_id" "$rc" "$utility_id v$declared" >&2
     rm -rf "$probe_dir"
     return 1
   fi
-  if ! cmp -s "$probe_dir/expected" "$probe_dir/stdout" &&
-    ! cmp -s "$probe_dir/expected-v" "$probe_dir/stdout"; then
+  if ! cmp -s "$probe_dir/expected" "$probe_dir/stdout"; then
     actual=$(LC_ALL=C tr '\n' ' ' <"$probe_dir/stdout")
-    printf 'utility %s: --version output %s; expected exactly %s on stdout\n' \
-      "$utility_id" "$(_go_quote "$actual")" "$(_go_quote "$utility_id $declared")" >&2
+    printf 'utility %s: --version output %s; expected exactly %s on stdout; print the v form and rebuild\n' \
+      "$utility_id" "$(_go_quote "$actual")" "$(_go_quote "$utility_id v$declared")" >&2
     rm -rf "$probe_dir"
     return 1
   fi

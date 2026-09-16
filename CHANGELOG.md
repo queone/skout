@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.15.3 | AC29 adopt Govna v0.61.0 governance |
 | 0.15.2 | AC28 adopt Govna v0.60.0 governance |
 | 0.15.1 | AC27 adopt Govna v0.59.1 governance; prep bumps README usage lines |
 | 0.15.0 | AC26 adopt Govna v0.58.0 governance; canon-style help; go fix cleanups |
