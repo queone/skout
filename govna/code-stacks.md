@@ -78,6 +78,7 @@
 - Require one literal `PROGRAM_VERSION: &str` strict stable SemVer declaration in each declared binary path.
 - Validate every declaration before compilation and each compiled binary before installation.
 - Validate every compiled binary before release-metadata writes.
+- Reject a release whose tag, message, or CHANGELOG row prep did not prepare in the current repository before the approval prompt.
 
 ## Terraform
 
@@ -88,6 +89,7 @@
 - Keep Terraform working data in repository-local ignored artifact directories.
 - Derive release versions from Git tags without a source version bump.
 - Reject scoped builds because Terraform validation is repository-wide.
+- Reject a release whose tag, message, or CHANGELOG row prep did not prepare in the current repository before the approval prompt.
 
 ## Swift
 
@@ -109,3 +111,4 @@
 - Build only selected executable products during scoped builds.
 - Install only selected executable products during scoped builds.
 - Treat native Xcode projects and Apple application bundles as a possible future backend.
+- Reject a release whose tag, message, or CHANGELOG row prep did not prepare in the current repository before the approval prompt.
