@@ -50,6 +50,10 @@ Ratify is the Director-triggered final acceptance review, not a request to recon
 
 Missing, incomplete, stale, or uncertain evidence still requires applicable revalidation. An inline correction also invalidates the evidence it affects. Evidence freshness never upgrades a failed, pending, manual, or unexercised disposition, and clean reuse never replaces Ratify's final review or contract-integrity check.
 
+## Why Draft And Clean Audit Advance Automatically
+
+A completed Draft flows into Audit, and a clean Audit flows into Refine, because those actions mutate nothing except the active AC document and stay cheap to redo before implementation. Automatic Refine entry requires every finding to be advancement-eligible: outside every Director-owned category with exactly one materially valid correction. Refine-to-Implement, Ratify, and Package stay Director-gated because they mutate the repository, accept work, or prepare a release.
+
 ## Canon Versus Local Flexibility
 
 Canon fixes shared roles, workflow, approvals, discipline, and review behavior. Consumers own non-conflicting `## Project Rules`, additional local governance documents, tooling, build scripts, and CI. Propose disputed canon upstream instead of creating permanent local drift.

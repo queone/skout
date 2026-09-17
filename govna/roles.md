@@ -38,7 +38,6 @@ This file defines Operator and Director ownership. `AGENTS.md` is authoritative.
 - Confirm scope, claims, citations, reference integrity, structure, terminology, and tests for every code change.
 - Search for stale references after renames, moves, or deletions.
 - Red-team assumptions and underspecified behavior.
-- Run `./build.sh` when the change touches code or build-relevant files and current build evidence is unavailable (skip for AC critique, doc-only review, design discussion).
 - Confirm that current evidence shows `./build.sh` passed when the change touches code or build-relevant files.
 - Run each acceptance test in the active AC when its current disposition is unavailable.
 - Report each current acceptance-test disposition.

@@ -5,15 +5,8 @@
 
 ## Multi-Utility Versioning
 
-- Keep the repository/package release version separate from each installable utility version.
-- Identify each utility by its stack-selected canonical target.
-- Require one strict stable SemVer declaration for each utility.
-- Require each utility's `--version` result to be exactly `<utility-id> v<MAJOR.MINOR.PATCH>` plus its newline on stdout with no stderr output.
+- Apply `govna/build-release.md` `## Independent Utility Versions` to every installable utility.
 - Let each stack adapter choose declaration syntax and source layout while reporting the normalized utility contract.
-- Validate declarations before compilation.
-- Validate compiled versions before installation.
-- Validate compiled versions before writing release metadata.
-- Preserve independent utility versions during repository release prep.
 
 ## Release Command
 
@@ -36,16 +29,8 @@
 - Require a utility README at `cmd/<name>/README.md`, when present, to carry a `### Usage` text block byte-equal to the help.
 - Replace each installed utility atomically from an adjacent staging file.
 - Preserve each installed utility until its replacement succeeds.
-- Use the successful final full build and clean Ratify review as current Package evidence.
-- Require applicable revalidation before Go prep when Package evidence is missing or stale.
-- Keep Go prep limited to version, changelog, released-AC, and matching `plan.md` pointer bookkeeping.
-- Run no canonical build, Go build, or Go dependency command during Go prep.
-- Reject every Go prep result outside its planned transformations.
 - Require every prep-changed version declaration to equal the unprefixed release tag.
-- Require the canonical changelog shape during prep.
 - Accept each `\|` pair in an existing summary cell as one escaped pipe during changelog shape validation.
-- Insert one exact release row immediately after `Unreleased`.
-- Reject multiline, over-80-byte, and Markdown-table-unsafe release messages.
 - Reject every release-message pipe, escaped or raw.
 - Emit no validation token from Go builds.
 - Remove invocation-owned build, coverage, version-probe, and installation-staging outputs on every handled exit.
@@ -56,8 +41,6 @@
 - Run dependency tidying, formatting, fixes, vetting, tests with coverage, staticcheck, and compilation.
 - Install command binaries into `$(go env GOPATH)/bin`.
 - Bump the single detected `programVersion` during release prep.
-- Validate independent utility versions in multi-utility repositories.
-- Preserve independent utility versions in multi-utility repositories.
 - Accept command names for scoped builds while retaining package-wide shared validation.
 - Capture the complete candidate Git tree without changing the repository index.
 - Display the candidate files and exact release sequence before approval.

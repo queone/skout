@@ -125,7 +125,6 @@ Note: prefer wording that is easiest for an LLM to follow, while staying simple 
 - Record an authorized correction in the governance document that owns the topic.
 - Prevent the governance-record rule from bypassing authorization for a governance edit.
 - Continue prohibiting memory entries, `feedback.md`, and session-note artifacts for repository-behavior corrections.
-- Require explicit Director authorization before changing consumer-local governance or govna canon.
 - Prevent contract-integrity reporting from authorizing a new AC phase, governance edit, delegation, commit, publication, or release action.
 
 ### Contract Growth
@@ -160,7 +159,6 @@ Note: prefer wording that is easiest for an LLM to follow, while staying simple 
 - Require explicit approval for: governance files, CI/release config, secrets handling, external integrations.
 - Edit only the files listed in the AC's `## In Scope` section, even after the user has authorized implementation.
 - Apply the effective-scope exception in `### Effective Implementation Scope` during Implement, closure-audit correction, and Ratify correction.
-- Apply the audit effective-scope exception in `### Audit Adoption` when a Director resolves any routing action.
 - Apply the same effective-implementation-scope principle to any other emitted-AC tool with Director-resolved routing decisions (e.g., `rm`'s Routing Decisions) — the named target is in scope once resolved, even when absent from `## In Scope`.
 - Stop when a request is ambiguous or the change is hard to reverse.
 - Ask for direction before proceeding.
@@ -235,16 +233,12 @@ Note: this rule does not prohibit batching independent commands.
 - Pause immediately when an automatic-transition eligibility condition fails.
 - Pause immediately when a Director-owned decision appears.
 - Prevent automatic advancement from authorizing Implement, Ratify, Package, release preparation, publication, delegation, or commits.
-- Treat standalone `Draft` or `draft` as the Director-authorized pre-cycle action that creates the active AC.
 - Keep Draft outside the AC phases.
 - Enter Audit automatically when Draft completes the active AC with populated scope and acceptance tests.
 - Keep an unscoped stub paused until the Director scopes it.
-- Treat the Draft authorization as continuing authority for that automatic Audit entry.
 - Start each governed AC cycle in Audit when the AC is ready for adversarial review.
 - Challenge the AC, repository behavior, referenced documentation, scope, edge cases, omissions, and testability during Audit.
-- Recheck new or unresolved contract-integrity findings before completing Audit.
 - Keep Audit non-mutating.
-- Do not edit the AC or repository during Audit.
 - Pause after Audit until the Director requests Refine unless integrated audit adoption or eligible automatic Refine entry applies.
 - Enter Refine automatically when Audit completes with only advancement-eligible findings.
 - Define an advancement-eligible finding as one outside every Director-owned category in `### General Gates` and roles.md `What the Operator Must Defer` with exactly one materially valid correction.
@@ -257,8 +251,6 @@ Note: this rule does not prohibit batching independent commands.
 - Run Pre-Implementation Verification after eligible automatic Refine completion.
 - Report implementation readiness only when that verification passes.
 - Remain in Refine when that verification finds a gap.
-- Validate AC-document-only Draft and Refine edits with the required document checks.
-- Keep AC-document-only Draft and Refine edits outside canonical validation cycles.
 - Do not begin implementation during Refine.
 - Pause after Refine and await explicit Director implementation-ready confirmation to Implement.
 - Implement only the settled AC scope during Implement.
@@ -273,7 +265,6 @@ Note: this rule does not prohibit batching independent commands.
 - Cite the active requirement that the gap violates.
 - Explain why the correction has only one materially valid outcome.
 - Exclude every Director-owned decision category from the exception.
-- Treat the original Implement authorization as continuing authority for an eligible correction round.
 - Limit autonomous Refine edits to the AC scope, path list, inventory, and acceptance coverage needed to close the gap.
 - Limit autonomous implementation edits to existing artifacts in the settled repository surface.
 - Prohibit the exception from creating a production or governance artifact.
@@ -285,21 +276,13 @@ Note: this rule does not prohibit batching independent commands.
 - Pause for the Director before a fourth correction round.
 - Prevent the exception from authorizing initial Implement, Audit, Ratify, Package, release preparation, publication, delegation, or commits.
 - Include tests, adversarial verification, and defect correction in Implement.
-- Apply `### Effective Implementation Scope` to eligible omitted artifacts during Implement and closure-audit correction.
-- Recheck new or unresolved contract-integrity findings before completing Implement and during the closure audit.
 - Run one exhaustive, non-mutating closure audit after Implement, validation, adversarial verification, and defect correction.
 - Keep the closure-audit working record in the active agent's session.
 - Do not create a separate closure-audit artifact.
 - Capture one deterministic Implement evidence snapshot in the closure-audit working record.
-- Capture the snapshot after final validation and the last repository mutation.
 - Complete the snapshot before Implement completion.
 - Follow `govna/development-cycle.md` `### Implement Evidence Snapshot` for snapshot contents and dependency boundaries.
-- Map every in-scope command entry point, provider/API fetch, normalized-table write, durable snapshot, stale fallback, freshness gate, and complete-snapshot reconciliation path in the closure audit.
-- Check every in-scope governance instruction against `## Instruction Style` during the closure audit.
-- Map every referenced governance document across applicable source, template, and rendered-consumer paths in the closure audit.
-- Compare every discovered path with the active AC `## In Scope`, `## Out Of Scope`, and `## Acceptance Tests` sections.
-- Record `Not applicable` with repository evidence when a path category is absent.
-- Record every acceptance-test disposition and residual risk in the closure audit.
+- Follow `govna/development-cycle.md` `### Closure Audit` for the paths, documents, and records the closure audit maps.
 - Block Implement completion when any required implementation path is unmapped or unverified or any implementation finding remains open.
 - Record pending Director review for manual acceptance tests without treating that pending review as an implementation finding or a path gap that blocks Implement completion.
 - Return to Implement for implementation defects found by the closure audit.
@@ -309,7 +292,6 @@ Note: this rule does not prohibit batching independent commands.
 - State zero unresolved implementation findings in the Implement completion report before Ratify.
 - Pause after Implement and await Ratify.
 - Treat standalone `Ratify` or `ratify` after successful Implement completion as the Director's acceptance action.
-- Check the Implement evidence snapshot with non-mutating state, version, content-identity, and diff checks.
 - Treat evidence as current only when the snapshot is present, complete, and identity-matching.
 - Treat every non-current snapshot as stale evidence.
 - Treat an unrecorded input as stale when a reused validation or acceptance check can read it.
@@ -321,12 +303,10 @@ Note: this rule does not prohibit batching independent commands.
 - Prohibit a new scratch directory, canon render, build, or test solely to repeat current evidence.
 - Rerun applicable validation when Ratify evidence is missing or stale.
 - Perform the final review during the same Ratify turn.
-- Recheck new or unresolved contract-integrity findings during Ratify.
 - Complete Ratify in that turn when the review finds no issue.
 - Apply the Approval Boundaries > General Gates and roles.md `What the Operator Must Defer` boundaries to classify any other Director-owned Ratify finding.
 - Return Ratify feedback to Refine, without completing Ratify, for a contract, scope, product, security, destructive, publication, or release finding.
 - Auto-correct an implementation-only finding inline during Ratify.
-- Apply `### Effective Implementation Scope` to eligible omitted artifacts during Ratify correction.
 - Rerun applicable validation after an inline Ratify correction.
 - Skip `./build.sh` in that revalidation only when the correction is documentation-only and not covered by this repo's own build validation.
 - Run the applicable document, render, or diff check in place of a skipped `./build.sh`.
@@ -336,7 +316,6 @@ Note: this rule does not prohibit batching independent commands.
 - Treat `Package` as the separate post-Ratify name for release preparation, not as a fifth AC phase.
 - Start `Package` only after an explicit Director request.
 - Do not infer Package from Ratify acceptance.
-- Treat standalone `Package`, `package`, `pack`, and `prep` as equivalent names for `Package` only after Ratify acceptance or for an established empty release batch.
 - Use the successful final full build and clean Ratify review as current pre-change Package evidence.
 - Pass the full build's validation token to Rust prep during `Package` only when the repository provides Rust validation-token support.
 - Fall back to a pre-change full build only when Rust validation-token support exists and its prep evidence is missing or stale.
@@ -444,42 +423,14 @@ Note: the Director flags scope concerns in chat during this window.
 - Treat each explicitly named migration destination as effective implementation scope with its routed source.
 - Treat `govna/preserve.txt` as effective implementation scope only when a resolved routing outcome requires creating or changing it.
 - Treat `CHANGELOG.md` as effective implementation scope only when a resolved legacy-phrase outcome requires removing an exact phrase.
-- Require no second Director authorization for an effective-scope preserve-registry change.
 - Require the Director to name every migration destination.
 - Apply each resolved routing action while leaving the emitted AC stub unchanged.
-- Install each missing canon-backed replacement before retired-source routing.
-- Render canon into a scratch directory using `govna render <scratch>`.
-- Inspect changes per `## In Scope` item by running `diff -ru <scratch>/<path> <path>`.
-- Add each resolved preserve target's exact path to `govna/preserve.txt`.
-- Remove each resolved sync, delete, or canon-backed migration target from `govna/preserve.txt`.
-- Create the registry with the `govna-preserve-v1` header when the first preserve entry is required.
-- Keep preserve-registry entries unique and byte-sorted.
-- Preserve unrelated preserve-registry entries.
-- Leave the registry absent or unchanged when its state already satisfies every resolved outcome.
-- Treat exact legacy preserve phrases in the Unreleased CHANGELOG Summary as migration evidence only.
-- Remove each exact legacy phrase only after verifying its resolved target and registry state.
-- Preserve unrelated CHANGELOG Summary text and historical rows.
-- Ensure the parent directory exists for each `## In Scope` item: `mkdir -p "$(dirname <path>)"`.
-- Categorize each `## In Scope` item as pure-canon or mixed-content before applying.
-- Apply pure-canon items by copying from canon: `cp <scratch>/<path> <path>`.
-- Apply mixed-content items by hunk-merge.
-- Replace canon-zone content above each registered boundary heading.
-- Use `## Project Rules` as the AGENTS.md boundary.
-- Use `## Project Practices` as the boundary for `govna/development-guidelines.md`, `govna/editing-guidelines.md`, and CODE `govna/build-release.md`.
+- Follow `govna/audit.md` `## Adoption procedure` for each resolved routing action.
 - Preserve the boundary heading and every line below it as repo-owned content.
 - Resolve an unresolved emitted repository check in chat.
-- Run the chosen repository command after all selected sync, migration, and deletion work.
 - Cite repository evidence when choosing `Not applicable` for the repository check.
 - Write `govna/canon-baseline.txt` from the scratch render only after every other applicable acceptance test and routing outcome passes and the resolved repository check succeeds or its `Not applicable` evidence holds.
-- Refresh Rust validation evidence from the same scratch baseline only when the repository provides Rust validation-token support and the installed `govna/canon-baseline.txt` is verified.
-- Use the refreshed Rust validation token as Package evidence only when the repository provides Rust validation-token support.
 - Do not re-run `govna audit` as an implementation gate for the emitted AC.
-- Verify each resolved sync target against its applicable rendered canon region.
-- Verify each migration source is absent unless the Director explicitly preserves it.
-- Verify each canon-backed migration destination against its applicable rendered canon region.
-- Verify each repo-owned migration destination against the Director's stated result.
-- Verify each resolved delete target is absent.
-- Verify each resolved preserve target remains and its exact path occurs in `govna/preserve.txt`.
 
 ## File-Change Discipline
 
@@ -542,8 +493,6 @@ Note: the Director triggers those actions; Ratify names what is pending.
 - Include the three-part self-review structure (Verified / Red-teamed / Not checked) defined in `govna/roles.md` in every substantial completion report, even when the default is terse.
 - Color `Verified:`, `Red-teamed:`, and `Not checked:` cyan only when the response channel explicitly supports native color or ANSI color.
 - Preserve plain-text self-review headings when response color is unavailable or disabled.
-- Place a section's sole item on the heading line without a bullet.
-- Use terse flat bullets when a self-review section has multiple items.
 - Start every Package completion report with the plain, unbulleted, unindented line `Package complete.`.
 - Insert exactly one blank line after `Package complete.` before `Verified:`.
 - Keep `Verified:`, `Red-teamed:`, `Not checked:`, and `Run below to release:` in the Package completion report.

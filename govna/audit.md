@@ -126,7 +126,6 @@ Require a final newline. Require exactly one non-empty command line after the he
 
 - Require explicit Director authorization for every `govna/repo-check.txt` creation or modification.
 - Treat a valid configured command as the standing Director resolution for the emitted repository check.
-- Emit the repository-check outcome pre-resolved to the configured command.
 - Name `govna/repo-check.txt` as the standing-resolution source in the emitted acceptance test.
 - Keep the no-baseline-migration `Not applicable` outcome ahead of the configured command.
 - Prefer the configured command over inferred validation evidence.
@@ -212,39 +211,11 @@ An audit with no updates or Director choices exits successfully and prints `No G
 - Measure prospective contract growth.
 - Verify target-side acceptance evidence.
 - Keep the emitted AC and consumer repository unchanged during Audit and Refine.
-- Remove the exact scratch directory before reporting Audit completion or a blocker.
 - Report every blocking finding and Director decision.
 
 Note: the executable ends after deterministic comparison and emission. The original explicit `govna audit` request authorizes this one bounded scratch review and its exact cleanup. The immutable AC records the adoption work; the active session records its phase. JSON remains available as optional machine output, but its diff fields are not required evidence for ordinary agent-mediated review.
 
 Effective implementation scope is the narrow rule that permits a directly affected supporting file to change when the Director already settled its outcome. Every Director-resolved routing target enters that scope while the generated AC remains unchanged. Explicitly named migration destinations also enter it. `govna/preserve.txt` enters only when a resolved outcome requires creating or changing it. `CHANGELOG.md` enters only when a resolved legacy-phrase outcome requires removing an exact phrase. Neither supporting-file adjustment requires a second Director authorization.
-
-### Emitted AC instruction and phase shape
-
-- Name each emitted adoption AC `# AC<N> Adopt Govna Governance Files v<CANON_VERSION>`.
-- Place the repository paragraph first under `## Summary`.
-- Start the repository paragraph with `This AC updates`.
-- Follow it with `The result label (classification)`.
-- Place the count paragraph after the repository paragraph.
-- Start the count paragraph with `Govna found`.
-- Keep the count and Summary paragraphs descriptive.
-- Place one `### Audit Review` section before `### Adoption Instructions`.
-- Bind Audit Review to the resolved executable and emitted marker versions.
-- Require one unique scratch render outside the consumer repository.
-- Emit one executable review command for every actionable path.
-- Apply `### Mixed-content sync verification` to every existing mixed-content review target.
-- Require exact rule, overlap, placement, reference, contract-growth, and acceptance-evidence review.
-- Require exact scratch cleanup before the Audit report.
-- Omit rendered diff bodies from the emitted AC.
-- Omit companion review artifacts.
-- Confirm each file selected for update exists in the selected CODE render.
-- Place that CODE-render check and all routing procedure under `### Adoption Instructions`.
-- Omit the CODE-render check from DOC audit emissions.
-- Emit each adoption instruction as one imperative bullet.
-- Format every numbered routing entry as one Director decision question.
-- End every numbered routing entry with `?`.
-- Keep shared implementation procedure out of routing questions.
-- End every emitted adoption AC with exact status `` `PENDING` — immutable audit emission; workflow state is tracked in the active session.``
 
 ### Routing capabilities
 
@@ -269,10 +240,6 @@ Effective implementation scope is the narrow rule that permits a directly affect
 
 ### Mixed-content sync verification
 
-- Capture the SHA-256 digest of each existing mixed-content target from the first byte of its exact registered boundary-heading line through end of file.
-- Include the boundary line, its line ending, the complete repository-owned tail, and the final-newline state in the protected region.
-- Emit the expected digest and boundary in the file-specific automated acceptance test for every direct sync.
-- Emit the same conditional verification for every review item whose Director resolution is sync.
 - Recompute the protected-region digest after adoption.
 - Require the protected-region digest to match the emitted digest.
 - Keep rendered-canon comparison scoped to the canon zone above the boundary.
@@ -280,62 +247,28 @@ Effective implementation scope is the narrow rule that permits a directly affect
 - Keep whole-file Audit Review comparison when either file lacks the exact registered boundary.
 - Preserve existing missing-target and target-only Audit Review commands.
 - Avoid comparing the repository-owned tail with rendered defaults.
-- Keep the protected-region digest out of classification, baseline scope, and JSON output.
-
-### Conditional routing verification
-
-- Emit a conditional rendered-region check for each offered sync outcome.
-- Emit a conditional preserve-registry exclusion check for each offered sync outcome.
-- Emit a conditional target-presence check for each offered preserve outcome.
-- Emit a conditional preserve-registry inclusion check for each offered preserve outcome.
-- Emit a conditional target-absence check for each offered delete outcome.
-- Emit a conditional preserve-registry exclusion check for each offered delete outcome.
-- Emit a conditional named-destination check for each offered migration outcome.
-- Emit a conditional source check for each offered migration outcome.
-- Emit a conditional canon-backed destination check for each offered migration outcome.
-- Emit a conditional repository-owned destination check for each offered migration outcome.
-- Emit a conditional preserve-registry check for each canon-backed migration outcome.
-- Emit a replacement-before-retired-source check for each replacement-missing route.
-- Emit a referenced-target state check for each marker-only route.
-- Emit a conversion registry check for each marker-only route.
-- Emit a removal registry check for each marker-only route.
-- Emit an exact-phrase absence check for each legacy-phrase route.
-- Emit a target-before-phrase check for each independently actionable legacy-phrase route.
-- Emit an unrelated-Summary preservation check for each legacy-phrase route.
-- Emit an outside-Summary preservation check for each legacy-phrase route.
-- Keep every emitted routing check atomic.
-- Keep emitted AT numbering stable across identical reports.
-
-- Apply repository-check inference when baseline installation or replacement is present.
-- Infer the repository check only from bounded target governance evidence.
-- Accept positive declarations only from exactly one AGENTS.md rule shaped ``Run `<command>` as the first validation command ...`` and exactly one rule shaped ``Use `<command>` for repository-wide ... validation ...``.
-- Require both positive declarations to name `./build.sh` for CODE inference.
-- Require root `build.sh` to resolve to a regular file for CODE inference.
-- Require the selected CODE stack's recognized root manifest before inferring `./build.sh`.
-- Recognize `go.mod`, `Cargo.toml`, `Package.swift`, and `.terraform.lock.hcl` or a root `*.tf` for Go, Rust, Swift, and Terraform respectively.
-- Require each recognized manifest path used as evidence to resolve to a regular file.
-- Treat selected-stack manifest evidence only as proof that the declared repository command can run.
-- Keep exact AGENTS.md declarations as the repository-command authority.
-- Infer `Not applicable` for DOC only when `govna/release.md` contains the exact canon no-automated-content-validation declaration and AGENTS.md contains no recognized positive declaration.
-- Leave missing, duplicate, incomplete, mismatched, positive-plus-negative, non-`./build.sh`, or non-regular-file evidence unresolved for a Director decision.
-- Leave absent, non-regular, or other-stack-only selected-manifest evidence unresolved for a Director decision.
-- Ignore unrelated manifests, other prose, governance documents, executables, CI files, and flavor defaults.
-
-- Record inferred repository-check evidence without requesting Director confirmation.
-- Omit the repository-check question and its manual resolution AT when the check is inferred.
-- Emit an unresolved repository check as the final numbered routing decision.
-- Use the exact unresolved repository-check question recorded in the note below.
-- Emit one manual resolution AT for an unresolved repository check.
-- Place the manual repository-check AT after every protected-region AT.
-- Emit one automated verification AT for an unresolved repository check.
-- Place the automated repository-check AT immediately after its manual AT.
-- Use singular nouns in emitted count summaries only for a count of one.
-- Use plural nouns in emitted count summaries for zero or multiple counts.
-
-Note: exact unresolved repository-check question: ``<N>. **Repository check**: Which command should run after the selected file updates, or what repository evidence shows that no command applies?``
 
 Emitted acceptance tests verify updates, required control files, every offered routing outcome, replacement ordering, legacy-phrase cleanup, and preservation according to the Director's choices. The pre-install rendered-file check covers declared update items except `govna/canon-baseline.txt`, review targets selected for update, and migration destinations backed by embedded Govna files. After all selected work, the chosen repository command must succeed, or the `Not applicable` evidence must hold. Only after every other applicable automated AT and routing outcome passes does the baseline get installed and verified separately from the same temporary render as the final step.
 
 Every audit-emitted AT carries exactly one source axis and one explicit timing axis. Current audit ATs use `[Automated] [Pre-release gate]` or `[Manual] [Pre-release gate]`; none defer verification until after release.
 
 Pass `--json` to print a machine-readable report (`header`: invocation, canon SHA, target, flavor and its source, repo name, govna/code-stack versions from metadata; `files`: one entry per scanned file with its classification, effective classification when force-synced, diff, prior commits, matched preserve-registry entries, legacy preserve-phrase evidence, canon reference, and mixed-content boundary where applicable; `emitted`: the stub's path for actionable reports or `null` for clean reports).
+
+## Adoption procedure
+
+- Apply this procedure to each routing action the Director resolves for an emitted adoption AC under `AGENTS.md` `### Audit Adoption`.
+- Render canon into a scratch directory using `govna render <scratch>`.
+- Inspect changes per `## In Scope` item by running `diff -ru <scratch>/<path> <path>`.
+- Ensure the parent directory exists for each `## In Scope` item: `mkdir -p "$(dirname <path>)"`.
+- Categorize each `## In Scope` item as pure-canon or mixed-content before applying.
+- Apply pure-canon items by copying from canon: `cp <scratch>/<path> <path>`.
+- Apply mixed-content items by hunk-merge.
+- Replace canon-zone content above each registered boundary heading.
+- Use the boundary registered in `## Mixed-content boundary registry` for each mixed-content item.
+- Run the chosen repository command after all selected sync, migration, and deletion work.
+- Verify each resolved sync target against its applicable rendered canon region.
+- Verify each migration source is absent unless the Director explicitly preserves it.
+- Verify each canon-backed migration destination against its applicable rendered canon region.
+- Verify each repo-owned migration destination against the Director's stated result.
+- Verify each resolved delete target is absent.
+- Verify each resolved preserve target remains and its exact path occurs in `govna/preserve.txt`.

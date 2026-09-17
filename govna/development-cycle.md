@@ -54,14 +54,20 @@ The lifecycle makes recurring programming checkpoints and their settled context 
 - Use the complete primary-repository state as the default dependency boundary.
 - Narrow the dependency boundary only when repository evidence proves that a reused check cannot read the excluded state.
 - Treat the snapshot as incomplete when a relevant ignored or external input cannot be identified.
+- Capture the snapshot after final validation and the last repository mutation.
+- Check the Implement evidence snapshot with non-mutating state, version, content-identity, and diff checks.
+
+### Closure Audit
+
+- Apply this section to the final read-only closure audit that ends Implement under `AGENTS.md` `### Four-Phase Workflow`.
+- Map every in-scope entry point, external read, durable write, fallback, gate, and reconciliation path in the closure audit.
+- Check every in-scope governance instruction against `AGENTS.md` `## Instruction Style` during the closure audit.
+- Map every referenced governance document across applicable source, template, and rendered-consumer paths in the closure audit.
+- Compare every discovered path with the active AC `## In Scope`, `## Out Of Scope`, and `## Acceptance Tests` sections.
+- Record `Not applicable` with repository evidence when a path category is absent.
+- Record every acceptance-test disposition and residual risk in the closure audit.
 
 Apply the complete phase, scope, correction, contract-integrity, and advancement rules in `AGENTS.md` throughout this cycle.
-
-The `govna` executable ends after deterministic audit comparison and emission. The Operator performs the integrated Audit, Refine, and Pre-Implementation Verification steps. A required change to an immutable emitted AC needs a new audit emission. The pre-Implement fit check uses one private provisional string only to prevent an oversized pending batch. Package requires every implemented batch member to be Ratified, compares the complete pending batch with the exact message, and rejects partial or oversized batches before prep. An empty release batch packages direct-handled changes without AC references only when no implemented AC awaits release.
-
-During Director-authorized Implement, a bounded completeness correction fixes a missed path or instruction when the active AC already settles the required result. The Operator may complete at most three correction rounds within the existing artifact family. Each round updates the AC in Refine, reruns the final AC wording and scope check called Pre-Implementation Verification, and returns to Implement. A Director-owned decision or fourth round pauses for the Director.
-
-A completed Draft flows into Audit, and a clean Audit flows into Refine, because those actions mutate nothing except the active AC document and stay cheap to redo before implementation. Automatic Refine entry requires every finding to be advancement-eligible: outside every Director-owned category with exactly one materially valid correction. Refine-to-Implement, Ratify, and Package stay Director-gated because they mutate the repository, accept work, or prepare a release.
 
 ## Notes
 
