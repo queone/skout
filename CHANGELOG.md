@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 0.15.6 | AC32 adopt Govna governance files v0.64.0; remove the CLAUDE.md link |
 | 0.15.5 | AC31 adopt Govna governance files v0.63.0 |
 | 0.15.4 | AC30 adopt Govna governance files v0.62.0 |
 | 0.15.3 | AC29 adopt Govna v0.61.0 governance |

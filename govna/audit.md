@@ -48,6 +48,7 @@ Every emitted audit AC uses these shared explanations:
 | `ambiguity` | Govna cannot safely choose between updating and keeping the file. |
 | `target-has-no-canon` | The file is absent from the selected current canon, but specific repository evidence connects it to Govna. |
 | `migration-required` | A required Govna control file is missing and must be added through the AC. |
+| `retired-link` | A Govna link that Claude Code no longer needs and the AC deletes. |
 
 `govna/metadata.txt` gets metadata-specific handling layered on top. An absent file is forced to `migration-required` regardless of the byte-comparison result (see Migration-required items). A present `canon_version` must use strict `vMAJOR.MINOR.PATCH` form. When the target version is lower than embedded canon and replacing only that field makes the whole file byte-equal to rendered canon, the file is forced to `clear-sync` regardless of git history or a preserve-registry entry. Other metadata differences remain whole-file review items. A malformed version fails before AC emission; a target version newer than embedded canon also fails and directs the operator to upgrade govna rather than downgrade consumer metadata.
 
@@ -150,6 +151,21 @@ Audit does not flag arbitrary consumer-owned governance documents that have none
 
 `govna/metadata.txt` or `govna/canon-baseline.txt` absent from an otherwise govna-adopted target classifies as `migration-required`. Every emitted AC includes `## Migration findings` after `## Out Of Scope`: it lists each migration path and completion action, or `None` when no migration exists. Migration paths also remain under `## In Scope`.
 
+## Retired link
+
+Govna used to create `CLAUDE.md` as a symbolic link to `AGENTS.md`. Claude Code v2.1.277 or later reads `AGENTS.md` directly, so audit retires that link.
+
+- Classify a root `CLAUDE.md` symbolic link whose target is exactly `AGENTS.md` as `retired-link`.
+- List the link under `### Retired Govna link` in the emitted AC as a deletion with no Director choice.
+- Add the acceptance test `Verify CLAUDE.md no longer exists.` for the link.
+- Report nothing for any other `CLAUDE.md`.
+
+Audit prints two hints to stderr on every run. The hints leave the exit code, stdout, the JSON report, and the emitted AC unchanged. The deletable hint links Anthropic's `AGENTS.md` documentation.
+
+- Print an upgrade hint when `claude --version` reports a version lower than 2.1.277.
+- Skip the upgrade hint when `claude` is absent, fails, exceeds two seconds, or prints an unreadable version.
+- Print a deletable hint when the repository root holds its own regular file or symbolic link named `CLAUDE.md`.
+
 ## Canon baseline manifest
 
 `govna/canon-baseline.txt` is the baseline: the saved hashes of the Govna-managed file regions previously installed in the repository. Its first line is `govna-canon-baseline-v1`, its second line is `canon_version = vMAJOR.MINOR.PATCH`, and each sorted remaining line is `<path><TAB><scope><TAB><sha256>`. Scope is `full` or `before:<boundary-heading>`. The manifest excludes itself and `govna/preserve.txt`; neither is classified as an ordinary governed file.
@@ -183,12 +199,13 @@ Audit skips target comparison when any coherence rule fails. The error names the
 
 ## Emitted AC stub
 
-Audit writes `govna/ac<N>-audit-<canon-version>.md` only when the repository has files ready to update, required control files to add, or files needing a Director choice. The canon version identifies the embedded governance-file version; `N` follows the monotonic AC-numbering rule. Clear-sync, missing-target, migration-required, ambiguity, target-has-no-canon, and format-defining forced-sync results require work. Match, expected-divergence, and ordinary preserve results do not. The generated AC follows `govna/ac-template.md` and groups every non-`match` file as follows:
+Audit writes `govna/ac<N>-audit-<canon-version>.md` only when the repository has files ready to update, required control files to add, files needing a Director choice, or a retired Govna link to delete. The canon version identifies the embedded governance-file version; `N` follows the monotonic AC-numbering rule. Clear-sync, missing-target, migration-required, ambiguity, target-has-no-canon, retired-link, and format-defining forced-sync results require work. Match, expected-divergence, and ordinary preserve results do not. The generated AC follows `govna/ac-template.md` and groups every non-`match` file as follows:
 
 - **Files ready to update** — `clear-sync`, `missing-in-target`, and any format-defining file forced to sync.
 - **Required control files** — `migration-required` items under `## Migration findings`.
 - **Out of scope** — files that stay unchanged: `preserve` and `expected-divergence`.
 - **Files needing a Director choice** — `ambiguity` and `target-has-no-canon`.
+- **Retired Govna link** — `retired-link`: the `CLAUDE.md` link that the AC deletes with no Director choice.
 
 The stub carries an edit-detection marker (SHA-256 body hash). Re-running audit against an unedited stub for the same canon version reuses the same AC number. Re-running it against an edited stub fails and directs the Director to delete or rename that generated file before retrying.
 
@@ -271,4 +288,6 @@ Pass `--json` to print a machine-readable report (`header`: invocation, canon SH
 - Verify each canon-backed migration destination against its applicable rendered canon region.
 - Verify each repo-owned migration destination against the Director's stated result.
 - Verify each resolved delete target is absent.
+- Delete the `CLAUDE.md` link for a `retired-link` item.
+- Verify the retired `CLAUDE.md` link is absent.
 - Verify each resolved preserve target remains and its exact path occurs in `govna/preserve.txt`.
