@@ -62,7 +62,7 @@ Candidate canon is the embedded governance version under review. A consumer-equi
 ### Release-batch safety
 
 - Exercise one-AC and fitting multi-AC pending batches.
-- Exercise an empty release batch with direct-handled changes before Package prep.
+- Exercise a direct batch before Package prep.
 - Exercise an oversized projected batch before another Implement.
 - Exercise oversized, partial, and partly unaccepted batches before Package prep.
 - Require every implemented pending-batch member to complete Ratify before Package.

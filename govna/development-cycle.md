@@ -39,7 +39,7 @@ The lifecycle makes recurring programming checkpoints and their settled context 
    - Reuse the Implement evidence snapshot when `AGENTS.md` defines it as current.
    - Revalidate affected evidence when `AGENTS.md` defines it as missing or stale.
    - Apply bounded correction behavior.
-6. **Package.** Run `govna/build-release.md` release preparation for the established Ratified or empty release batch only after separate Director authorization.
+6. **Package.** Run `govna/build-release.md` release preparation for the established Ratified release batch or direct batch only after separate Director authorization.
 
 ### Implement Evidence Snapshot
 
