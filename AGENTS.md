@@ -72,6 +72,24 @@ Note: prefer wording that is easiest for an LLM to follow, while staying simple 
 - Lead with the concrete problem, effect, or decision in plain language.
 - Pair each necessary Govna label with its plain-language meaning at first use.
 
+### STE Replies
+
+- Apply these limits to chat replies only.
+- Keep each sentence that tells the reader to act to 20 words or fewer.
+- Keep every other sentence to 25 words or fewer.
+- Keep each paragraph to six sentences or fewer.
+- Give one instruction per sentence.
+- Start each warning with the command or the condition.
+- Use one term for each concept.
+- Keep each noun cluster to three words or fewer.
+- Use the active voice.
+- Use the passive voice only when the actor is unknown or unimportant.
+- Write complete sentences without dropping articles or verbs.
+- Exempt the terse status bullets that `## Review Style` requires from the complete-sentence limit.
+- Exempt code, commands, paths, identifiers, quoted text, and fixed lines that other AGENTS.md rules require from these limits.
+
+Note: these limits borrow from Simplified Technical English (ASD-STE100), and they supplement `### Plain Language` and `## Review Style` instead of replacing them.
+
 ### Session Entry
 
 - Treat AGENTS.md as the active operating contract for this repository.
