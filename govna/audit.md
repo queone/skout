@@ -14,6 +14,7 @@ Here, flavor means the CODE or DOC set of Govna files selected for the repositor
 
 - `-f, --flavor code|doc` — overlay flavor (default: auto-detect from repo signals).
 - `-s, --stack <name>` — CODE stack (default: inferred from manifests; not accepted with `--flavor doc`).
+- `-c, --check` — report the result without writing an AC; exit `3` when updates or Director choices are needed.
 - `-j, --json` — also print a JSON report to stdout alongside the markdown emission.
 - `-l, --diff-lines <N>` — diff truncation limit (default: 200).
 - `-n, --repo-name <name>` — override repo name (default: basename of the target directory).
@@ -210,6 +211,8 @@ Audit writes `govna/ac<N>-audit-<canon-version>.md` only when the repository has
 The stub carries an edit-detection marker (SHA-256 body hash). Re-running audit against an unedited stub for the same canon version reuses the same AC number. Re-running it against an edited stub fails and directs the Director to delete or rename that generated file before retrying.
 
 An audit with no updates or Director choices exits successfully and prints `No Govna updates or Director choices found`, followed by a plain result tally and `No AC was written.` It performs no AC-number allocation, stub inspection, directory creation, or file write. It never deletes, overwrites, or validates an existing audit stub. With `--json`, the complete report remains available and `emitted` is `null`; no additional prose is written.
+
+A check-mode audit (`-c` or `--check`) runs the same comparison and writes nothing. It performs no AC-number allocation, stub inspection, directory creation, or file write. A clean result prints the clean-result line above and exits `0`. An actionable result prints `Govna updates or Director choices found`, followed by a plain result tally and `Run govna audit without --check to write the review AC.`, and exits `3`. With `--json`, the complete report is printed with `emitted` set to `null` and no additional prose. Because check mode emits no AC, it starts no agent-mediated adoption review.
 
 ### Agent-mediated review
 
