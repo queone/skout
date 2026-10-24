@@ -193,8 +193,7 @@ Before comparing anything against the target, audit checks that Govna's rendered
 - Require `AGENTS.md` to define the structured Package completion report.
 - Require the selected release guide to end that structured report with the exact release command.
 - Reject retired command-only Package wording.
-- Require integrated audit adoption to enter Refine without another instruction.
-- Require integrated audit adoption to stop before Implement.
+- Require `AGENTS.md` to carry the integrated-audit Refine-entry exemption and pre-Implement stop.
 
 Audit skips target comparison when any coherence rule fails. The error names the conflicting rendered file and directs the Operator to report it to the Govna maintainer.
 
@@ -226,16 +225,10 @@ A check-mode audit (`-c` or `--check`) runs the same comparison and writes nothi
 - Require the rendered baseline canon version to match the emitted AC marker.
 - Compare every actionable path through the emitted `### Audit Review` instructions.
 - Review the exact proposed rules.
-- Check rule overlap and placement.
 - Resolve every candidate reference.
-- Measure prospective contract growth.
 - Verify target-side acceptance evidence.
-- Keep the emitted AC and consumer repository unchanged during Audit and Refine.
-- Report every blocking finding and Director decision.
 
-Note: the executable ends after deterministic comparison and emission. The original explicit `govna audit` request authorizes this one bounded scratch review and its exact cleanup. The immutable AC records the adoption work; the active session records its phase. JSON remains available as optional machine output, but its diff fields are not required evidence for ordinary agent-mediated review.
-
-Effective implementation scope is the narrow rule that permits a directly affected supporting file to change when the Director already settled its outcome. Every Director-resolved routing target enters that scope while the generated AC remains unchanged. Explicitly named migration destinations also enter it. `govna/preserve.txt` enters only when a resolved outcome requires creating or changing it. `CHANGELOG.md` enters only when a resolved legacy-phrase outcome requires removing an exact phrase. Neither supporting-file adjustment requires a second Director authorization.
+Note: the executable ends after deterministic comparison and emission. JSON remains available as optional machine output, but its diff fields are not required evidence for ordinary agent-mediated review.
 
 ### Routing capabilities
 
