@@ -464,3 +464,17 @@ func boolText(value bool) string {
 	}
 	return "false"
 }
+
+func TestNonStatusCommandsNeverRunTheStatusUpdateCheck(t *testing.T) {
+	calls := 0
+	handlers := Handlers{Status: func(league string) (string, error) { calls++; return league, nil }}
+	for _, args := range [][]string{{"version"}, {"-v"}, {"--version"}, {"help"}, {"i", "ERA"}} {
+		var stdout, stderr bytes.Buffer
+		if code := Run(args, "0.16.0", Context{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr, Prompt: &stderr}, handlers); code != 0 {
+			t.Errorf("args=%v code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("non-status commands called the status handler %d times", calls)
+	}
+}

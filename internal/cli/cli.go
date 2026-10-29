@@ -128,7 +128,7 @@ func ProductionHandlers(version string, context Context) Handlers {
 	}
 	return Handlers{
 		Fetch:  func(host, path string) (string, error) { return app.FetchProduction(version, host, path) },
-		Status: func(league string) (string, error) { return app.StatusProduction(league, mode) },
+		Status: func(league string) (string, error) { return app.StatusProduction(league, version, mode) },
 		Sync: func(league, team string, debug bool, output io.Writer) (string, error) {
 			return app.SyncProduction(app.SyncOptions{
 				Version: version, League: league, Team: team, Debug: debug,

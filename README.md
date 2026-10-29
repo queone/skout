@@ -27,9 +27,11 @@ The league may be a numeric ID or a full Yahoo league key. The team may be a tea
 While Yahoo's longer refresh runs in an interactive terminal, `skout sync` updates acquired-player and matchup-history counts in place. Redirected output remains one line per provider outcome.
 
 ```bash
-skout st       # show local provider and snapshot status
+skout st       # show local provider, snapshot, and release-update status
 skout sync     # refresh the saved league and team
 ```
+
+`skout st` ends with an `Update:` row that names a newer skout release and its exact `go install` command. It asks the Go module proxy at most once a day, caches the answer in `skout/update-check` under the platform cache directory, and never changes the exit code. Set `NO_UPDATE_CHECK` to any non-empty value to skip the check. No other command makes an update-check request.
 
 Yahoo's public fantasy endpoints are unofficial and may deny access or change without notice. skout does not attempt to bypass those restrictions; it retains complete prior data and reports recovery guidance.
 
@@ -40,7 +42,7 @@ Yahoo's public fantasy endpoints are unofficial and may deny access or change wi
 skout sync                 # refresh the saved public league and team
 skout sync -l 170874       # select and refresh a public Yahoo league
 skout sync -T Toros        # select the primary fantasy team
-skout st                   # inspect local provider and snapshot status
+skout st                   # inspect local provider, snapshot, and release-update status
 skout st -l 170874         # save a league selection and clear an incompatible team
 skout reset                # explicitly delete the local skout database
 
@@ -130,7 +132,7 @@ ESPN and OddsShark are supplemental sources. OddsShark is unofficial and may deg
 
 ## Building from Source
 
-Requires Go 1.27 or newer.
+Requires Go 1.27.2 or newer.
 
 ```bash
 ./build.sh

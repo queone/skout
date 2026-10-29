@@ -20,10 +20,13 @@ type LocalOptions struct {
 	DatabasePath string
 	Now          func() time.Time
 	Mode         terminal.ColorMode
+	Update       func() string
 }
 
 // StatusProduction renders status and persists an explicit league selection.
-func StatusProduction(requestedLeague string, mode terminal.ColorMode) (string, error) {
+func StatusProduction(requestedLeague, version string, mode terminal.ColorMode) (string, error) {
+	result, updateErr := checkUpdate(version)
+	updateValue := updateStatus(result, updateErr, mode)
 	configPath, err := config.Path()
 	if err != nil {
 		return "", fmt.Errorf("status: resolve configuration path: %w", err)
@@ -36,7 +39,7 @@ func StatusProduction(requestedLeague string, mode terminal.ColorMode) (string, 
 	if err != nil {
 		return "", fmt.Errorf("status: acquire database operation guard: %w", err)
 	}
-	output, statusErr := Status(LocalOptions{ConfigPath: configPath, DatabasePath: databasePath, Now: time.Now, Mode: mode}, requestedLeague)
+	output, statusErr := Status(LocalOptions{ConfigPath: configPath, DatabasePath: databasePath, Now: time.Now, Mode: mode, Update: func() string { return updateValue }}, requestedLeague)
 	guardErr := guard.Close()
 	if statusErr != nil || guardErr != nil {
 		return "", errors.Join(statusErr, func() error {
@@ -69,11 +72,16 @@ func Status(options LocalOptions, requestedLeague string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("status: inspect database: %w", err)
 	}
-	return RenderStatus(options.DatabasePath, options.ConfigPath, settings, status, options.Mode), nil
+	updateValue := terminal.Dim("skipped (update check unavailable)", options.Mode)
+	if options.Update != nil {
+		updateValue = options.Update()
+	}
+	return RenderStatus(options.DatabasePath, options.ConfigPath, settings, status, updateValue, options.Mode), nil
 }
 
-// RenderStatus renders the frozen status fields in their contracted order.
-func RenderStatus(databasePath, configPath string, settings config.Config, status store.Status, mode terminal.ColorMode) string {
+// RenderStatus renders the frozen status fields in their contracted order,
+// followed by the already styled update row.
+func RenderStatus(databasePath, configPath string, settings config.Config, status store.Status, update string, mode terminal.ColorMode) string {
 	hasSnapshot := status.MLBIdentityCount > 0 || status.UnmatchedPlayerCount > 0
 	legacyFailure := status.ProviderLastError != nil && isLegacyYahooFailure(*status.ProviderLastError)
 	lastRun := "none"
@@ -137,11 +145,12 @@ func RenderStatus(databasePath, configPath string, settings config.Config, statu
 		{"Unmatched players", unmatched},
 		{"League", league},
 		{"Config", terminal.Dim(filepath.Clean(configPath), mode)},
+		{"Update", update},
 	}
 	var output strings.Builder
 	for _, row := range rows {
 		value := row[1]
-		if row[0] != "League" && row[0] != "Config" {
+		if row[0] != "League" && row[0] != "Config" && row[0] != "Update" {
 			value = terminal.Dim(value, mode)
 		}
 		fmt.Fprintf(&output, "%s: %s\n", row[0], value)

@@ -11,7 +11,7 @@ Skout is a terminal-oriented, read-only fantasy baseball advisor. It combines a 
 The executable application surface has six paths:
 
 1. `sync` resolves a public Yahoo league and primary team, acquires complete provider snapshots in a fixed foreground order, and records isolated freshness and run outcomes.
-2. `st` reads configuration and SQLite status through non-mutating inspection APIs; an explicit `-l` selection updates configuration without opening the database for writes.
+2. `st` reads configuration and SQLite status through non-mutating inspection APIs; an explicit `-l` selection updates configuration without opening the database for writes. Before taking the database guard, it runs the daily release-update check through gkit's `update` package and renders the result as the final `Update` row.
 3. `t`, `tt`, and `sp` coordinate public provider adapters, versioned command snapshots, typed store writes, optional local Yahoo context, stale fallback, and deterministic terminal renderers.
 4. `fetch` validates an allowlisted provider alias and origin-relative path before using the bounded transport.
 5. `m`, `r`, `rt`, `h`, and `p` combine durable fantasy reads with command-time public Yahoo, MLB schedule, game-log, boxscore, lineup, and odds acquisition; isolated versioned snapshots preserve the last complete view.
@@ -54,7 +54,7 @@ Yahoo synchronization acquires independent team rosters and matchup weeks with a
 
 ## Persistence
 
-The runtime uses `$HOME/.config/skout/config.json`, `$HOME/.config/skout/skout.db`, and the platform cache root under `skout/api-cache`. Configuration and cache replacement are private and atomic. SQLite uses schema version 7, one dedicated connection, WAL mode, a five-second busy timeout, and immediate transactions for complete replacements.
+The runtime uses `$HOME/.config/skout/config.json`, `$HOME/.config/skout/skout.db`, the platform cache root under `skout/api-cache`, and the daily release-update cache at `skout/update-check` beside it. Configuration and cache replacement are private and atomic. SQLite uses schema version 7, one dedicated connection, WAL mode, a five-second busy timeout, and immediate transactions for complete replacements.
 
 Production SQLite commands hold a shared database-operation lock for their complete connection or inspection lifetime. Reset takes the lock exclusively, so it cannot remove local state beneath another command. The separate synchronization lock continues to prevent overlapping foreground syncs. Reset rejects non-regular database-family targets, deletes the primary database before its auxiliary files, and preserves configuration, cache, runtime locks, and unrelated files.
 
